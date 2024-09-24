@@ -7,7 +7,6 @@
 name: supabase
 version: "3.8"
 
-
 services:
   app:
     container_name: app
@@ -32,8 +31,7 @@ services:
     networks:
       - my_network
     env_file:
-      - ../.env.local
-
+      - ../next-app/.env.local
   studio:
     container_name: supabase-studio
     image: supabase/studio:20240729-ce42139
@@ -75,6 +73,7 @@ services:
     networks:
       - my_network
 
+
   kong:
     container_name: supabase-kong
     image: kong:2.8.1
@@ -105,6 +104,7 @@ services:
     networks:
       - my_network
 
+      
   auth:
     container_name: supabase-auth
     image: supabase/gotrue:v2.158.1
@@ -186,6 +186,7 @@ services:
     networks:
       - my_network
 
+      
 
 
 
@@ -212,6 +213,7 @@ services:
     networks:
       - my_network
 
+      
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
     container_name: realtime-dev.supabase-realtime
@@ -258,6 +260,7 @@ services:
     networks:
       - my_network
 
+      
   # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
   storage:
     container_name: supabase-storage
@@ -304,6 +307,7 @@ services:
     networks:
       - my_network
 
+      
   imgproxy:
     container_name: supabase-imgproxy
     image: darthsim/imgproxy:v3.8.0
@@ -322,6 +326,7 @@ services:
     networks:
       - my_network
 
+      
   meta:
     container_name: supabase-meta
     image: supabase/postgres-meta:v0.83.2
@@ -342,9 +347,10 @@ services:
     networks:
       - my_network
 
+      
   functions:
     container_name: supabase-edge-functions
-    image: supabase/edge-runtime:v1.58.2
+    image: supabase/edge-runtime:v1.58.3
     restart: unless-stopped
     depends_on:
       analytics:
@@ -366,6 +372,7 @@ services:
     networks:
       - my_network
 
+      
   analytics:
     container_name: supabase-analytics
     image: supabase/logflare:1.4.0
@@ -410,6 +417,7 @@ services:
     networks:
       - my_network
 
+      
   # Comment out everything below this point if you are using an external Postgres database
   db:
     container_name: supabase-db
@@ -459,6 +467,7 @@ services:
     networks:
       - my_network
 
+      
   vector:
     container_name: supabase-vector
     image: timberio/vector:0.28.1-alpine
@@ -485,9 +494,9 @@ services:
     networks:
       - my_network
 
+      
 volumes:
   db-config:
-
 networks:
   my_network:
     external: true
