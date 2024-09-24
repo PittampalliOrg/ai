@@ -1,6 +1,6 @@
 FROM mcr.microsoft.com/devcontainers/javascript-node:1-18-bookworm
 
-WORKDIR /workspace/supabase
+WORKDIR /workspace/ai
 
 # # Copy package manager files first to leverage Docker's caching for dependency installation
 # COPY next-app/package.json next-app/yarn.lock* next-app/package-lock.json* next-app/pnpm-lock.yaml* ./
