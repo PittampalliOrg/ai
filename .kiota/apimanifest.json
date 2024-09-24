@@ -1,0 +1,898 @@
+{
+  "applicationName": "application",
+  "apiDependencies": {
+<<<<<<< HEAD
+    "Graph": {
+      "apiDescriptionUrl": "https://raw.githubusercontent.com/microsoftgraph/msgraph-metadata/master/openapi/v1.0/openapi.yaml",
+      "apiDeploymentBaseUrl": "https://graph.microsoft.com/v1.0/",
+=======
+    "GraphClient": {
+      "apiDescriptionUrl": "./.kiota/documents/GraphClient/openapi.yaml",
+      "apiDeploymentBaseUrl": "https://graph.microsoft.com/beta/",
+>>>>>>> mgt
+      "requests": [
+        {
+          "method": "POST",
+          "uriTemplate": "drives/{drive-id}/items/{driveItem-id}/createLink"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "drives/{drive-id}/items/{driveItem-id}/preview"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "drives/{drive-id}/items/{driveItem-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "drives/{drive-id}/items"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "drives/{drive-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "drives"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/calendar/events"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/calendar"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/drives/{drive-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/drives"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/mailFolders/{mailFolder-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/mailFolders"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/messages/{message-id}/send"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/messages/{message-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/messages/delta()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/messages"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "PUT",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/$count"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/createUploadSession"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "PUT",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/delta()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/mailFolders"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/mailFolders"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/messages"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/messages"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/sendMail"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "PUT",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/$count"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/createUploadSession"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "PUT",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/delta()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/delta()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/drive"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/drives/{drive-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/drives"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/items/{baseItem-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/items"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites"
+        }
+      ],
+      "extensions": {
+<<<<<<< HEAD
+        "x-ms-kiota-hash": "B17C0DFC1751C8A927F31BFAB8E058214C067AF9E4CEF710E994EDFB279F5779"
+      }
+    },
+    "GraphClient": {
+      "apiDescriptionUrl": "https://raw.githubusercontent.com/microsoftgraph/msgraph-metadata/master/openapi/v1.0/openapi.yaml",
+      "apiDeploymentBaseUrl": "https://graph.microsoft.com/v1.0/",
+      "requests": [
+        {
+          "method": "GET",
+          "uriTemplate": "me/mailFolders"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/mailFolders"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/messages"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/messages"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/sendMail"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/extensions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "PUT",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}/$value"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/{attachmentBase-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/$count"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments/createUploadSession"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachments"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "PUT",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}/content"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/{attachmentSession-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/attachmentSessions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/{checklistItem-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/checklistItems"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/{extension-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/extensions"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/{linkedResource-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}/linkedResources"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/{todoTask-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks/delta()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}/tasks"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo/lists/{todoTaskList-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/$count"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists/delta()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo/lists"
+        },
+        {
+          "method": "POST",
+          "uriTemplate": "me/todo/lists"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/todo"
+        },
+        {
+          "method": "PATCH",
+          "uriTemplate": "me/todo"
+        },
+        {
+          "method": "DELETE",
+          "uriTemplate": "me/todo"
+        }
+      ],
+      "extensions": {
+        "x-ms-kiota-hash": "B17C0DFC1751C8A927F31BFAB8E058214C067AF9E4CEF710E994EDFB279F5779"
+=======
+        "x-ms-kiota-hash": "648F45F3CD86C31FDF2ECCCD69C02B628153995DB9573CEA0B8CB567D7124BDC"
+      }
+    },
+    "Beta": {
+      "apiDescriptionUrl": "https://raw.githubusercontent.com/microsoftgraph/msgraph-metadata/master/openapi/beta/openapi.yaml",
+      "apiDeploymentBaseUrl": "https://graph.microsoft.com/beta/",
+      "requests": [
+        {
+          "method": "POST",
+          "uriTemplate": "drives/{drive-id}/items/{driveItem-id}/preview"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "groups/{group-id}/onenote/notebooks/{notebook-id}/sectionGroups/{sectionGroup-id}/sections/{onenoteSection-id}/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/onenote/notebooks/{notebook-id}/sectionGroups/{sectionGroup-id}/sections/{onenoteSection-id}/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/onenote/notebooks/{notebook-id}/sections/{onenoteSection-id}/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/onenote/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/onenote/sectionGroups/{sectionGroup-id}/sections/{onenoteSection-id}/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "me/onenote/sections/{onenoteSection-id}/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/drive"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/drives/{drive-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/drives"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/items/{baseItem-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/items"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/onenote/notebooks/{notebook-id}/sectionGroups/{sectionGroup-id}/sections/{onenoteSection-id}/pages/{onenotePage-id}/preview()"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}/sites/{site-id1}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites/{site-id}"
+        },
+        {
+          "method": "GET",
+          "uriTemplate": "sites"
+        }
+      ],
+      "extensions": {
+        "x-ms-kiota-hash": "6EAEC654E203E24F1951A3472624C9AB35FF4B8EB21B6677FB5D2E74C4D1063D"
+>>>>>>> mgt
+      }
+    }
+  }
+}

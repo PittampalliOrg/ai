@@ -1,0 +1,32 @@
+{
+  "name": "Next.js and Supabase Development Environment",
+  "dockerComposeFile": [
+    "../docker/docker-compose.yml"
+  ],
+  "service": "app",
+  "workspaceFolder": "/workspace/supabase",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscode.typescript-language-features",
+        "GitHub.copilot",
+        "denoland.vscode-deno",
+        "Supabase.vscode-supabase-extension",
+        "ms-azuretools.vscode-docker",
+        "dbaeumer.vscode-eslint",
+        "Postman.postman-for-vscode",
+        "ms-edgedevtools.vscode-edge-devtools",
+        "tamasfe.even-better-toml",
+        "eamodio.gitlens",
+        "ms-playwright.playwright"
+      ]
+    }
+  },
+  "postCreateCommand": "npm install && npm install --save-dev dbmate",
+  "remoteUser": "node",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker": {},
+    "ghcr.io/devcontainers-contrib/features/deno:latest": {},
+    "ghcr.io/itsmechlark/features/redis-server:1": {}
+  }
+}
