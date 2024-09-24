@@ -28,7 +28,7 @@ async function UserOrLogin() {
           <SidebarToggle />
         </>
       ) : (
-        <Link href="/new" rel="nofollow">
+        <Link href="/sign-up" rel="nofollow">
           <IconNextChat className="size-6 mr-2 dark:hidden" inverted />
           <IconNextChat className="hidden size-6 mr-2 dark:block" />
         </Link>
@@ -39,7 +39,7 @@ async function UserOrLogin() {
           <UserMenu user={session.user} />
         ) : (
           <Button variant="link" asChild className="-ml-2">
-            <Link href="/login">Login</Link>
+            <Link href="/sign-in">Login</Link>
           </Button>
         )}
       </div>
