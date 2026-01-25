@@ -168,3 +168,81 @@ export const stream = pgTable(
 );
 
 export type Stream = InferSelectModel<typeof stream>;
+
+// ============================================================================
+// Agent Tables (for async coding agent functionality)
+// ============================================================================
+
+// Target repository for agent sessions
+export const targetRepository = pgTable("TargetRepository", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  owner: varchar("owner", { length: 256 }).notNull(),
+  repo: varchar("repo", { length: 256 }).notNull(),
+  branch: varchar("branch", { length: 256 }).notNull(),
+  installationId: text("installationId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type TargetRepository = InferSelectModel<typeof targetRepository>;
+
+// Agent session state (extends Chat concept for coding agent)
+export const agentSession = pgTable("AgentSession", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("userId")
+    .notNull()
+    .references(() => user.id),
+  targetRepositoryId: uuid("targetRepositoryId").references(
+    () => targetRepository.id
+  ),
+  title: text("title").notNull(),
+  status: varchar("status", {
+    enum: ["idle", "running", "completed", "error"],
+  }).default("idle"),
+  taskPlan: json("taskPlan"),
+  branchName: varchar("branchName", { length: 256 }),
+  repoPath: varchar("repoPath", { length: 1024 }),
+  // Kubernetes sandbox columns
+  sandboxClaimName: varchar("sandboxClaimName", { length: 256 }),
+  sandboxPodName: varchar("sandboxPodName", { length: 256 }),
+  sandboxNamespace: varchar("sandboxNamespace", { length: 64 }).default("agent-sandbox"),
+  sandboxStatus: varchar("sandboxStatus", {
+    enum: ["pending", "bound", "ready", "failed", "released"],
+  }),
+  // Dapr Workflow columns (for Ralph Loop)
+  workflowId: varchar("workflowId", { length: 256 }),
+  workflowStatus: varchar("workflowStatus", {
+    enum: ["none", "pending", "running", "suspended", "completed", "failed", "terminated"],
+  }).default("none"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export type AgentSession = InferSelectModel<typeof agentSession>;
+
+// Agent messages (uses same structure as Message_v2)
+export const agentMessage = pgTable("AgentMessage", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sessionId: uuid("sessionId")
+    .notNull()
+    .references(() => agentSession.id),
+  role: varchar("role", { length: 32 }).notNull(),
+  parts: json("parts").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AgentMessage = InferSelectModel<typeof agentMessage>;
+
+// GitHub installations for multi-org support
+export const githubInstallation = pgTable("GitHubInstallation", {
+  id: text("id").primaryKey(),
+  userId: uuid("userId")
+    .notNull()
+    .references(() => user.id),
+  accountLogin: varchar("accountLogin", { length: 256 }).notNull(),
+  accountType: varchar("accountType", {
+    enum: ["User", "Organization"],
+  }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GitHubInstallation = InferSelectModel<typeof githubInstallation>;

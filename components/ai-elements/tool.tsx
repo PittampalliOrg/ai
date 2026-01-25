@@ -18,6 +18,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { CodeBlock } from "./code-block";
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
@@ -110,9 +111,9 @@ export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
     <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       Parameters
     </h4>
-    <pre className="overflow-x-auto rounded-md bg-muted/50 p-3 font-mono text-xs">
-      {JSON.stringify(input, null, 2)}
-    </pre>
+    <div className="rounded-md bg-muted/50">
+      <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+    </div>
   </div>
 );
 
@@ -131,21 +132,15 @@ export const ToolOutput = ({
     return null;
   }
 
-  const renderOutput = () => {
-    if (typeof output === "object" && !isValidElement(output)) {
-      return (
-        <pre className="overflow-x-auto p-3 font-mono text-xs">
-          {JSON.stringify(output, null, 2)}
-        </pre>
-      );
-    }
-    if (typeof output === "string") {
-      return (
-        <pre className="overflow-x-auto p-3 font-mono text-xs">{output}</pre>
-      );
-    }
-    return <div className="p-3">{output as ReactNode}</div>;
-  };
+  let Output = <div>{output as ReactNode}</div>;
+
+  if (typeof output === "object" && !isValidElement(output)) {
+    Output = (
+      <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
+    );
+  } else if (typeof output === "string") {
+    Output = <CodeBlock code={output} language="json" />;
+  }
 
   return (
     <div className={cn("space-y-2 p-4", className)} {...props}>
@@ -160,8 +155,8 @@ export const ToolOutput = ({
             : "bg-muted/50 text-foreground"
         )}
       >
-        {errorText && <div className="p-3">{errorText}</div>}
-        {!errorText && renderOutput()}
+        {errorText && <div>{errorText}</div>}
+        {Output}
       </div>
     </div>
   );

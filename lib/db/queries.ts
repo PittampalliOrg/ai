@@ -62,19 +62,111 @@ export async function createUser(email: string, password: string) {
   }
 }
 
-export async function createGuestUser() {
-  const email = `guest-${Date.now()}`;
-  const password = generateHashedPassword(generateUUID());
+// Guest user creation removed - using GitHub-only auth
+
+/**
+ * Verify that a user exists in the database
+ * Use this before any FK insert operations to prevent constraint violations
+ */
+export async function verifyUserExists(userId: string): Promise<boolean> {
+  try {
+    const existingUsers = await db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.id, userId))
+      .limit(1);
+
+    return existingUsers.length > 0;
+  } catch (error) {
+    console.error("[verifyUserExists] Database error:", error);
+    return false;
+  }
+}
+
+/**
+ * Get user by ID
+ */
+export async function getUserById(userId: string): Promise<User | null> {
+  try {
+    const existingUsers = await db
+      .select()
+      .from(user)
+      .where(eq(user.id, userId))
+      .limit(1);
+
+    return existingUsers.length > 0 ? existingUsers[0] : null;
+  } catch (error) {
+    console.error("[getUserById] Database error:", error);
+    throw new ChatSDKError("bad_request:database", "Failed to get user by ID");
+  }
+}
+
+export async function findOrCreateGitHubUser(
+  githubId: string,
+  email: string | null,
+  name: string | null
+) {
+  // Use a consistent email format for GitHub users
+  const userEmail = email || `github-${githubId}@github.local`;
+
+  console.log(
+    `[findOrCreateGitHubUser] Looking for user with email: ${userEmail}`
+  );
 
   try {
-    return await db.insert(user).values({ email, password }).returning({
-      id: user.id,
-      email: user.email,
-    });
-  } catch (_error) {
+    // First try to find existing user by email
+    const existingUsers = await db
+      .select()
+      .from(user)
+      .where(eq(user.email, userEmail));
+
+    if (existingUsers.length > 0) {
+      console.log(
+        `[findOrCreateGitHubUser] Found existing user: ${existingUsers[0].id}`
+      );
+      return existingUsers[0];
+    }
+
+    // Create new user for GitHub account
+    console.log(`[findOrCreateGitHubUser] Creating new user for: ${userEmail}`);
+    const password = generateHashedPassword(generateUUID());
+    const newUsers = await db
+      .insert(user)
+      .values({ email: userEmail, password })
+      .returning({
+        id: user.id,
+        email: user.email,
+      });
+
+    if (newUsers.length === 0) {
+      console.error(
+        "[findOrCreateGitHubUser] Insert returned no rows, this should not happen"
+      );
+      throw new Error("Failed to create user - no rows returned");
+    }
+
+    console.log(`[findOrCreateGitHubUser] Created new user: ${newUsers[0].id}`);
+
+    // Verify the user was actually created
+    const verifiedUser = await db
+      .select()
+      .from(user)
+      .where(eq(user.id, newUsers[0].id))
+      .limit(1);
+
+    if (verifiedUser.length === 0) {
+      console.error(
+        `[findOrCreateGitHubUser] User ${newUsers[0].id} not found after creation!`
+      );
+      throw new Error("User verification failed after creation");
+    }
+
+    return verifiedUser[0];
+  } catch (error) {
+    console.error("[findOrCreateGitHubUser] Error:", error);
     throw new ChatSDKError(
       "bad_request:database",
-      "Failed to create guest user"
+      "Failed to find or create GitHub user"
     );
   }
 }

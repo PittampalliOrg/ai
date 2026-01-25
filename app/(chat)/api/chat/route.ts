@@ -2,13 +2,17 @@ import { geolocation } from "@vercel/functions";
 import {
   convertToModelMessages,
   createUIMessageStream,
-  createUIMessageStreamResponse,
-  generateId,
+  JsonToSseTransformStream,
+  smoothStream,
   stepCountIs,
   streamText,
+  type UIMessage,
 } from "ai";
 import { after } from "next/server";
-import { createResumableStreamContext } from "resumable-stream";
+import {
+  createResumableStreamContext,
+  type ResumableStreamContext,
+} from "resumable-stream";
 import { auth, type UserType } from "@/app/(auth)/auth";
 import { entitlementsByUserType } from "@/lib/ai/entitlements";
 import { type RequestHints, systemPrompt } from "@/lib/ai/prompts";
@@ -38,15 +42,27 @@ import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
 export const maxDuration = 60;
 
-function getStreamContext() {
-  try {
-    return createResumableStreamContext({ waitUntil: after });
-  } catch (_) {
-    return null;
-  }
-}
+let globalStreamContext: ResumableStreamContext | null = null;
 
-export { getStreamContext };
+export function getStreamContext() {
+  if (!globalStreamContext) {
+    try {
+      globalStreamContext = createResumableStreamContext({
+        waitUntil: after,
+      });
+    } catch (error: any) {
+      if (error.message.includes("REDIS_URL")) {
+        console.log(
+          " > Resumable streams are disabled due to missing REDIS_URL"
+        );
+      } else {
+        console.error(error);
+      }
+    }
+  }
+
+  return globalStreamContext;
+}
 
 export async function POST(request: Request) {
   let requestBody: PostRequestBody;
@@ -79,6 +95,7 @@ export async function POST(request: Request) {
       return new ChatSDKError("rate_limit:chat").toResponse();
     }
 
+    // Check if this is a tool approval flow (all messages sent)
     const isToolApprovalFlow = Boolean(messages);
 
     const chat = await getChatById({ id });
@@ -89,19 +106,24 @@ export async function POST(request: Request) {
       if (chat.userId !== session.user.id) {
         return new ChatSDKError("forbidden:chat").toResponse();
       }
+      // Only fetch messages if chat already exists and not tool approval
       if (!isToolApprovalFlow) {
         messagesFromDb = await getMessagesByChatId({ id });
       }
     } else if (message?.role === "user") {
+      // Save chat immediately with placeholder title
       await saveChat({
         id,
         userId: session.user.id,
         title: "New chat",
         visibility: selectedVisibilityType,
       });
+
+      // Start title generation in parallel (don't await)
       titlePromise = generateTitleFromUserMessage({ message });
     }
 
+    // Use all messages for tool approval, otherwise DB messages + new message
     const uiMessages = isToolApprovalFlow
       ? (messages as ChatMessage[])
       : [...convertToUIMessages(messagesFromDb), message as ChatMessage];
@@ -115,6 +137,7 @@ export async function POST(request: Request) {
       country,
     };
 
+    // Only save user messages to the database (not tool approval responses)
     if (message?.role === "user") {
       await saveMessages({
         messages: [
@@ -130,19 +153,108 @@ export async function POST(request: Request) {
       });
     }
 
-    const isReasoningModel =
-      selectedChatModel.includes("reasoning") ||
-      selectedChatModel.includes("thinking");
+    const streamId = generateUUID();
+    await createStreamId({ streamId, chatId: id });
 
-    const modelMessages = await convertToModelMessages(uiMessages);
+    // Check if this is a Claude Code model - needs special handling for agent loop
+    const isClaudeCodeModel = selectedChatModel.startsWith("claude-code/");
 
+    // For Claude Code models, use streamText with toUIMessageStreamResponse directly
+    // This bypasses createUIMessageStream which has issues with Claude Code's stream format
+    if (isClaudeCodeModel) {
+      // Handle title generation in background
+      if (titlePromise) {
+        titlePromise.then((title) => {
+          updateChatTitleById({ chatId: id, title });
+        });
+      }
+
+      const result = streamText({
+        model: getLanguageModel(selectedChatModel),
+        system: `You are Claude Code, an expert AI coding assistant created by Anthropic.
+You have access to powerful agentic tools for software development:
+
+- Read files to understand code
+- Write and edit files to implement changes
+- Run shell commands for builds, tests, and git operations
+- Search codebases with glob and grep
+- Spawn sub-agents for complex multi-step tasks
+- Search the web for documentation and information
+
+Work autonomously to complete the user's request. Think step-by-step, use your tools effectively,
+and verify your work before reporting completion.`,
+        messages: await convertToModelMessages(uiMessages),
+        // Allow many steps for Claude Code's agent loop
+        stopWhen: stepCountIs(50),
+        // Claude Code has built-in tools - don't provide AI SDK tools
+        experimental_telemetry: {
+          isEnabled: true,
+          functionId: "claude-code-stream",
+          metadata: {
+            chatId: id,
+            modelId: selectedChatModel,
+            isClaudeCodeModel: true,
+          },
+        },
+      });
+
+      // Use toUIMessageStreamResponse directly - this handles streaming properly
+      return result.toUIMessageStreamResponse({
+        sendReasoning: true,
+        // Generate proper UUIDs for messages
+        generateMessageId: generateUUID,
+        // Pass original messages for proper message tracking
+        originalMessages: uiMessages,
+        // Save messages after stream completes
+        onFinish: async ({ messages: finishedMessages }) => {
+          try {
+            if (finishedMessages.length > 0) {
+              // Save only new assistant messages (filter out existing user messages)
+              const newMessages = finishedMessages.filter(
+                (msg) => !uiMessages.find((m) => m.id === msg.id)
+              );
+              if (newMessages.length > 0) {
+                await saveMessages({
+                  messages: newMessages.map((currentMessage) => ({
+                    id: currentMessage.id,
+                    role: currentMessage.role,
+                    parts: currentMessage.parts,
+                    createdAt: new Date(),
+                    attachments: [],
+                    chatId: id,
+                  })),
+                });
+              }
+            }
+          } catch (error) {
+            console.error("Failed to save Claude Code messages:", error);
+          }
+        },
+      });
+    }
+
+    // Non-Claude-Code models use the standard approach with createUIMessageStream
     const stream = createUIMessageStream({
+      // Pass original messages for tool approval continuation
       originalMessages: isToolApprovalFlow ? uiMessages : undefined,
       execute: async ({ writer: dataStream }) => {
+        // Handle title generation in parallel
+        if (titlePromise) {
+          titlePromise.then((title) => {
+            updateChatTitleById({ chatId: id, title });
+            dataStream.write({ type: "data-chat-title", data: title });
+          });
+        }
+
+        // Note: Claude Code models are handled above with early return
+        const isReasoningModel =
+          selectedChatModel.includes("reasoning") ||
+          selectedChatModel.includes("thinking");
+
         const result = streamText({
           model: getLanguageModel(selectedChatModel),
           system: systemPrompt({ selectedChatModel, requestHints }),
-          messages: modelMessages,
+          messages: await convertToModelMessages(uiMessages),
           stopWhen: stepCountIs(5),
           experimental_activeTools: isReasoningModel
             ? []
@@ -152,6 +264,9 @@ export async function POST(request: Request) {
                 "updateDocument",
                 "requestSuggestions",
               ],
+          experimental_transform: isReasoningModel
+            ? undefined
+            : smoothStream({ chunking: "word" }),
           providerOptions: isReasoningModel
             ? {
                 anthropic: {
@@ -163,33 +278,44 @@ export async function POST(request: Request) {
             getWeather,
             createDocument: createDocument({ session, dataStream }),
             updateDocument: updateDocument({ session, dataStream }),
-            requestSuggestions: requestSuggestions({ session, dataStream }),
+            requestSuggestions: requestSuggestions({
+              session,
+              dataStream,
+            }),
           },
           experimental_telemetry: {
-            isEnabled: isProductionEnvironment,
-            functionId: "stream-text",
+            isEnabled: true,
+            functionId: "chat-stream",
+            metadata: {
+              chatId: id,
+              modelId: selectedChatModel,
+              isReasoningModel,
+            },
           },
         });
 
-        dataStream.merge(result.toUIMessageStream({ sendReasoning: true }));
+        result.consumeStream();
 
-        if (titlePromise) {
-          const title = await titlePromise;
-          dataStream.write({ type: "data-chat-title", data: title });
-          updateChatTitleById({ chatId: id, title });
-        }
+        dataStream.merge(
+          result.toUIMessageStream({
+            sendReasoning: true,
+          })
+        );
       },
       generateId: generateUUID,
       onFinish: async ({ messages: finishedMessages }) => {
         if (isToolApprovalFlow) {
+          // For tool approval, update existing messages (tool state changed) and save new ones
           for (const finishedMsg of finishedMessages) {
             const existingMsg = uiMessages.find((m) => m.id === finishedMsg.id);
             if (existingMsg) {
+              // Update existing message with new parts (tool state changed)
               await updateMessage({
                 id: finishedMsg.id,
                 parts: finishedMsg.parts,
               });
             } else {
+              // Save new message
               await saveMessages({
                 messages: [
                   {
@@ -205,6 +331,7 @@ export async function POST(request: Request) {
             }
           }
         } else if (finishedMessages.length > 0) {
+          // Normal flow - save all finished messages
           await saveMessages({
             messages: finishedMessages.map((currentMessage) => ({
               id: currentMessage.id,
@@ -217,30 +344,28 @@ export async function POST(request: Request) {
           });
         }
       },
-      onError: () => "Oops, an error occurred!",
-    });
-
-    return createUIMessageStreamResponse({
-      stream,
-      async consumeSseStream({ stream: sseStream }) {
-        if (!process.env.REDIS_URL) {
-          return;
-        }
-        try {
-          const streamContext = getStreamContext();
-          if (streamContext) {
-            const streamId = generateId();
-            await createStreamId({ streamId, chatId: id });
-            await streamContext.createNewResumableStream(
-              streamId,
-              () => sseStream
-            );
-          }
-        } catch (_) {
-          // ignore redis errors
-        }
+      onError: () => {
+        return "Oops, an error occurred!";
       },
     });
+
+    const streamContext = getStreamContext();
+
+    if (streamContext) {
+      try {
+        const resumableStream = await streamContext.resumableStream(
+          streamId,
+          () => stream.pipeThrough(new JsonToSseTransformStream())
+        );
+        if (resumableStream) {
+          return new Response(resumableStream);
+        }
+      } catch (error) {
+        console.error("Failed to create resumable stream:", error);
+      }
+    }
+
+    return new Response(stream.pipeThrough(new JsonToSseTransformStream()));
   } catch (error) {
     const vercelId = request.headers.get("x-vercel-id");
 
@@ -248,6 +373,7 @@ export async function POST(request: Request) {
       return error.toResponse();
     }
 
+    // Check for Vercel AI Gateway credit card error
     if (
       error instanceof Error &&
       error.message?.includes(

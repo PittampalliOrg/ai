@@ -1,13 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { User } from "next-auth";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
 import { unstable_serialize } from "swr/infinite";
-import { PlusIcon, TrashIcon } from "@/components/icons";
+import { PlusIcon, TrashIcon, TerminalIcon, GitHubActionsIcon } from "@/components/icons";
+import {
+  Workflow,
+  FileText,
+  GitBranch,
+  Radio,
+  Database,
+  ChevronRight,
+  LayoutDashboard,
+  Boxes,
+} from "lucide-react";
 import {
   getChatHistoryPaginationKey,
   SidebarHistory,
@@ -20,8 +30,18 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
   useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,12 +53,29 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
+import { cn } from "@/lib/utils";
+
+const platformLinks = [
+  { href: "/dapr-workflows", label: "Workflows", icon: Workflow },
+  { href: "/workflow-patterns", label: "Patterns", icon: Boxes },
+  { href: "/api-logs", label: "API Logs", icon: FileText },
+  { href: "/call-graph", label: "Call Graph", icon: GitBranch },
+  { href: "/pub-sub", label: "Pub/Sub", icon: Radio },
+  { href: "/kv-store", label: "KV Store", icon: Database },
+];
 
 export function AppSidebar({ user }: { user: User | undefined }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { setOpenMobile } = useSidebar();
   const { mutate } = useSWRConfig();
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false);
+  const [platformOpen, setPlatformOpen] = useState(true);
+
+  // Check if current path is a platform page
+  const isPlatformPage = platformLinks.some(
+    (link) => pathname === link.href || pathname.startsWith(link.href + "/")
+  );
 
   const handleDeleteAll = () => {
     const deletePromise = fetch("/api/history", {
@@ -56,6 +93,10 @@ export function AppSidebar({ user }: { user: User | undefined }) {
       },
       error: "Failed to delete all chats",
     });
+  };
+
+  const isActiveLink = (href: string) => {
+    return pathname === href || pathname.startsWith(href + "/");
   };
 
   return (
@@ -116,9 +157,87 @@ export function AppSidebar({ user }: { user: User | undefined }) {
             </div>
           </SidebarMenu>
         </SidebarHeader>
+
         <SidebarContent>
+          {/* Agent Section */}
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-xs uppercase text-muted-foreground">
+              Agent
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActiveLink("/agent")}
+                  >
+                    <Link href="/agent" onClick={() => setOpenMobile(false)}>
+                      <TerminalIcon size={16} />
+                      <span>Coding Agent</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActiveLink("/github-actions")}
+                  >
+                    <Link href="/github-actions" onClick={() => setOpenMobile(false)}>
+                      <GitHubActionsIcon size={16} />
+                      <span>GitHub Actions</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          {/* Platform Section (Collapsible) */}
+          <Collapsible open={platformOpen} onOpenChange={setPlatformOpen}>
+            <SidebarGroup>
+              <CollapsibleTrigger asChild>
+                <SidebarGroupLabel className="cursor-pointer hover:bg-muted/50 rounded-md -mx-2 px-2 flex items-center justify-between text-xs uppercase text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <LayoutDashboard className="h-3 w-3" />
+                    <span>Platform</span>
+                  </div>
+                  <ChevronRight
+                    className={cn(
+                      "h-4 w-4 transition-transform duration-200",
+                      platformOpen && "rotate-90"
+                    )}
+                  />
+                </SidebarGroupLabel>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {platformLinks.map((link) => (
+                      <SidebarMenuItem key={link.href}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={isActiveLink(link.href)}
+                        >
+                          <Link
+                            href={link.href}
+                            onClick={() => setOpenMobile(false)}
+                          >
+                            <link.icon className="h-4 w-4" />
+                            <span>{link.label}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
+
+          {/* Chat History */}
           <SidebarHistory user={user} />
         </SidebarContent>
+
         <SidebarFooter>{user && <SidebarUserNav user={user} />}</SidebarFooter>
       </Sidebar>
 

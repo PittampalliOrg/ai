@@ -1159,6 +1159,40 @@ export const FullscreenIcon = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
+export const MinimizeIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M5 1V1.75V4.5H2.25H1.5V6H2.25H5.5C5.77614 6 6 5.77614 6 5.5V2.25V1.5V1H5ZM11 1V1.5V2.25V5.5C11 5.77614 10.7761 6 10.5 6H7.25H6.5V4.5H7.25H10V1.75V1H11ZM1.5 10H2.25H5V12.75V13.5V14H6V13.5V12.75V9.5C6 9.22386 5.77614 9 5.5 9H2.25H1.5V10ZM7.25 9H6.5V10H7.25H10V12.75V13.5V14H11V13.5V12.75V9.5C11 9.22386 10.7761 9 10.5 9H7.25Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const MicrophoneIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M8 0C6.34315 0 5 1.34315 5 3V7C5 8.65685 6.34315 10 8 10C9.65685 10 11 8.65685 11 7V3C11 1.34315 9.65685 0 8 0ZM6.5 3C6.5 2.17157 7.17157 1.5 8 1.5C8.82843 1.5 9.5 2.17157 9.5 3V7C9.5 7.82843 8.82843 8.5 8 8.5C7.17157 8.5 6.5 7.82843 6.5 7V3ZM3 6.25V7C3 9.76142 5.23858 12 8 12C10.7614 12 13 9.76142 13 7V6.25V5.5H14.5V6.25V7C14.5 10.3741 11.9398 13.1485 8.75 13.4633V14.5H11H11.75V16H11H5H4.25V14.5H5H7.25V13.4633C4.06019 13.1485 1.5 10.3741 1.5 7V6.25V5.5H3V6.25Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
 export const DownloadIcon = ({ size = 16 }: { size?: number }) => (
   <svg
     height={size}
@@ -1211,3 +1245,395 @@ export const WarningIcon = ({ size = 16 }: { size?: number }) => {
     </svg>
   );
 };
+
+export const SendIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M1.5 1L1.85355 1.35355L14.8536 14.3536L15.5 15L14.5 15L2 15C1.44772 15 1 14.5523 1 14L1 1.5L1.5 1ZM2.5 2.5L2.5 13.5L13.5 13.5L2.5 2.5Z"
+      fill="currentColor"
+      fillRule="evenodd"
+      transform="rotate(-45 8 8)"
+    />
+  </svg>
+);
+
+export const FolderIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M0 2.5C0 1.67157 0.671573 1 1.5 1H5.5C5.77614 1 6.04348 1.09881 6.25 1.27735L7.5 2.33579C7.70652 2.51433 7.97386 2.61314 8.25 2.61314H14.5C15.3284 2.61314 16 3.28472 16 4.11314V12.5C16 13.3284 15.3284 14 14.5 14H1.5C0.671573 14 0 13.3284 0 12.5V2.5ZM1.5 2.5H5.5L6.75 3.55845C6.95652 3.73699 7.22386 3.8358 7.5 3.8358H14.5V12.5H1.5V2.5Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const GitBranchIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M5 3.25C5 3.94036 4.44036 4.5 3.75 4.5C3.05964 4.5 2.5 3.94036 2.5 3.25C2.5 2.55964 3.05964 2 3.75 2C4.44036 2 5 2.55964 5 3.25ZM6.5 3.25C6.5 4.57697 5.50862 5.68122 4.23177 5.92451C4.3151 7.07455 5.14348 8 6 8H10C11.1046 8 12 8.89543 12 10V10.0755C10.4912 10.3188 9.5 11.4231 9.5 12.75C9.5 14.2688 10.7312 15.5 12.25 15.5C13.7688 15.5 15 14.2688 15 12.75C15 11.4231 14.0088 10.3188 12.5 10.0755V10C12.5 9.17157 11.8284 8.5 11 8.5H6C4.89543 8.5 4 7.60457 4 6.5V5.92451C5.27685 5.68122 6.5 4.57697 6.5 3.25ZM12.25 11.5C11.5596 11.5 11 12.0596 11 12.75C11 13.4404 11.5596 14 12.25 14C12.9404 14 13.5 13.4404 13.5 12.75C13.5 12.0596 12.9404 11.5 12.25 11.5ZM3.75 6C5.26878 6 6.5 4.76878 6.5 3.25C6.5 1.73122 5.26878 0.5 3.75 0.5C2.23122 0.5 1 1.73122 1 3.25C1 4.76878 2.23122 6 3.75 6Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const CheckIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M13.7803 4.28033L14.3107 3.75L13.25 2.68934L12.7197 3.21967L6 9.93934L3.28033 7.21967L2.75 6.68934L1.68934 7.75L2.21967 8.28033L5.46967 11.5303C5.76256 11.8232 6.23744 11.8232 6.53033 11.5303L13.7803 4.28033Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const XIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M12.4697 13.5303L13 14.0607L14.0607 13L13.5303 12.4697L9.06066 8L13.5303 3.53033L14.0607 3L13 1.93934L12.4697 2.46967L8 6.93934L3.53033 2.46967L3 1.93934L1.93934 3L2.46967 3.53033L6.93934 8L2.46967 12.4697L1.93934 13L3 14.0607L3.53033 13.5303L8 9.06066L12.4697 13.5303Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const ClockIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5ZM8 16C12.4183 16 16 12.4183 16 8C16 3.58172 12.4183 0 8 0C3.58172 0 0 3.58172 0 8C0 12.4183 3.58172 16 8 16ZM8.75 4V4.75V7.68934L10.7197 9.65901L11.25 10.1893L10.1893 11.25L9.65901 10.7197L7.29289 8.35355C7.10536 8.16602 7 7.91421 7 7.65147V4.75V4H8.75Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const ChevronUpIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M8.70711 5.29289L14.7071 11.2929L14 12L8 6L2 12L1.29289 11.2929L7.29289 5.29289C7.68342 4.90237 8.31658 4.90237 8.70711 5.29289Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const ThumbsUpIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M10.8 1C10.0268 1 9.33333 1.54545 9.1 2.36364L8 6H3C1.89543 6 1 6.89543 1 8V13C1 14.1046 1.89543 15 3 15H11.2C12.5255 15 13.6 13.9255 13.6 12.6V10H14C14.5523 10 15 9.55229 15 9V5C15 4.44772 14.5523 4 14 4H12.1333L11.6667 2.36364C11.4333 1.54545 10.7399 1 9.96667 1H10.8ZM10.8 2.5H9.96667C9.86667 2.5 9.76667 2.59091 9.73333 2.72727L8.43333 7.5H3C2.72386 7.5 2.5 7.72386 2.5 8V13C2.5 13.2761 2.72386 13.5 3 13.5H11.2C11.6971 13.5 12.1 13.0971 12.1 12.6V8.5H14V5.5H11.2333L10.4333 2.72727C10.4 2.59091 10.3 2.5 10.2 2.5H10.8Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const ThumbsDownIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      clipRule="evenodd"
+      d="M10.8 15C10.0268 15 9.33333 14.4545 9.1 13.6364L8 10H3C1.89543 10 1 9.10457 1 8V3C1 1.89543 1.89543 1 3 1H11.2C12.5255 1 13.6 2.07452 13.6 3.4V6H14C14.5523 6 15 6.44772 15 7V11C15 11.5523 14.5523 12 14 12H12.1333L11.6667 13.6364C11.4333 14.4545 10.7399 15 9.96667 15H10.8ZM10.8 13.5H9.96667C9.86667 13.5 9.76667 13.4091 9.73333 13.2727L8.43333 8.5H3C2.72386 8.5 2.5 8.27614 2.5 8V3C2.5 2.72386 2.72386 2.5 3 2.5H11.2C11.6971 2.5 12.1 2.90294 12.1 3.4V7.5H14V10.5H11.2333L10.4333 13.2727C10.4 13.4091 10.3 13.5 10.2 13.5H10.8Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);
+
+export const ArrowLeftIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M6.46967 13.5303L0.939339 8L6.46967 2.46967L7.53033 3.53033L3.81066 7.25H15.25V8.75H3.81066L7.53033 12.4697L6.46967 13.5303Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+export const ArchiveIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M1.5 3V4.5H14.5V3H1.5ZM0 2.5C0 1.94772 0.447715 1.5 1 1.5H15C15.5523 1.5 16 1.94772 16 2.5V5C16 5.55228 15.5523 6 15 6H14.5V13C14.5 14.1046 13.6046 15 12.5 15H3.5C2.39543 15 1.5 14.1046 1.5 13V6H1C0.447715 6 0 5.55228 0 5V2.5ZM3 6V13C3 13.2761 3.22386 13.5 3.5 13.5H12.5C12.7761 13.5 13 13.2761 13 13V6H3ZM5.5 8.25H10.5V9.75H5.5V8.25Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+export const GitPullRequestIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M4.75 1.5C3.50736 1.5 2.5 2.50736 2.5 3.75C2.5 4.7267 3.12982 5.56058 4 5.87803V10.122C3.12982 10.4394 2.5 11.2733 2.5 12.25C2.5 13.4926 3.50736 14.5 4.75 14.5C5.99264 14.5 7 13.4926 7 12.25C7 11.2733 6.37018 10.4394 5.5 10.122V5.87803C6.37018 5.56058 7 4.7267 7 3.75C7 2.50736 5.99264 1.5 4.75 1.5ZM4 3.75C4 3.33579 4.33579 3 4.75 3C5.16421 3 5.5 3.33579 5.5 3.75C5.5 4.16421 5.16421 4.5 4.75 4.5C4.33579 4.5 4 4.16421 4 3.75ZM4.75 11.5C4.33579 11.5 4 11.8358 4 12.25C4 12.6642 4.33579 13 4.75 13C5.16421 13 5.5 12.6642 5.5 12.25C5.5 11.8358 5.16421 11.5 4.75 11.5ZM9.5 3.75C9.5 2.50736 10.5074 1.5 11.75 1.5C12.9926 1.5 14 2.50736 14 3.75C14 4.7267 13.3702 5.56058 12.5 5.87803V10.122C13.3702 10.4394 14 11.2733 14 12.25C14 13.4926 12.9926 14.5 11.75 14.5C10.5074 14.5 9.5 13.4926 9.5 12.25C9.5 11.2733 10.1298 10.4394 11 10.122V5.87803C10.1298 5.56058 9.5 4.7267 9.5 3.75ZM11.75 3C11.3358 3 11 3.33579 11 3.75C11 4.16421 11.3358 4.5 11.75 4.5C12.1642 4.5 12.5 4.16421 12.5 3.75C12.5 3.33579 12.1642 3 11.75 3ZM11 12.25C11 11.8358 11.3358 11.5 11.75 11.5C12.1642 11.5 12.5 11.8358 12.5 12.25C12.5 12.6642 12.1642 13 11.75 13C11.3358 13 11 12.6642 11 12.25Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+export const WifiOffIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    strokeLinejoin="round"
+    style={{ color: "currentcolor" }}
+    viewBox="0 0 16 16"
+    width={size}
+  >
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M1.29289 1.29289L1.64645 1.64645L14.3536 14.3536L14.7071 14.7071L13.2929 16.1213L12.9393 15.7678L11.1716 14L8 14C7.44772 14 7 13.5523 7 13C7 12.4477 7.44772 12 8 12C8.55228 12 9 12.4477 9 13L10.1716 13L6.67082 9.49918C5.63673 9.81542 4.69711 10.3518 3.9 11.05L2.8 9.7C3.65956 8.95064 4.6412 8.34391 5.70918 7.91082L4.23223 6.43387C3.04058 7.06287 1.96113 7.87924 1.025 8.85L0 7.7C0.840698 6.83055 1.79426 6.07166 2.83934 5.44066L1.29289 3.89422L0.939339 3.54066L2.35355 2.12645L2.70711 2.48L1.29289 1.29289ZM8 2C10.3933 2 12.6077 2.77934 14.4 4.1L13.3 5.45C11.8114 4.33965 10.0034 3.66667 8.03717 3.50895L6.52539 2H8ZM8 6C9.05058 6 10.0518 6.21044 10.9657 6.59413L12.1 5.45C10.8805 4.53543 9.46447 3.90399 7.93523 3.62402L6.42345 2.11224C6.61282 2.03905 6.80574 1.97452 7.00195 1.91895C7.32987 1.82864 7.6611 1.76257 7.99609 1.72168L8 2C8.65625 2 9.29541 2.07422 9.91113 2.21484C11.0586 2.48047 12.1299 2.95703 13.0869 3.60645C14.0264 4.24219 14.8506 5.04199 15.5264 5.97363L14.5 7.1C13.8743 6.24902 13.1157 5.5166 12.2529 4.93066C11.3125 4.29492 10.2651 3.83984 9.15039 3.59473C8.55273 3.46484 7.93701 3.40039 7.31055 3.40391L8 6ZM8 10C8.55228 10 9 10.4477 9 11C9 11.5523 8.55228 12 8 12C7.44772 12 7 11.5523 7 11C7 10.4477 7.44772 10 8 10Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+export const CircularProgressIcon = ({ size = 16, className }: { size?: number; className?: string }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    className={className}
+    style={{ color: "currentcolor" }}
+  >
+    <circle
+      cx="8"
+      cy="8"
+      r="6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeOpacity="0.2"
+    />
+    <circle
+      cx="8"
+      cy="8"
+      r="6"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeDasharray="28"
+      strokeDashoffset="21"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+export const SquareIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    style={{ color: "currentcolor" }}
+  >
+    <rect
+      x="3"
+      y="3"
+      width="10"
+      height="10"
+      rx="2"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+export const SplitViewIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    style={{ color: "currentcolor" }}
+  >
+    <rect
+      x="1"
+      y="2"
+      width="6"
+      height="12"
+      rx="1"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <rect
+      x="9"
+      y="2"
+      width="6"
+      height="12"
+      rx="1"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
+
+export const UnifiedViewIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    style={{ color: "currentcolor" }}
+  >
+    <rect
+      x="2"
+      y="2"
+      width="12"
+      height="12"
+      rx="1"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="2"
+      y1="6"
+      x2="14"
+      y2="6"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <line
+      x1="2"
+      y1="10"
+      x2="14"
+      y2="10"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+  </svg>
+);
+
+export const IncrementalIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    style={{ color: "currentcolor" }}
+  >
+    <path
+      d="M4 4h8M4 8h5M4 12h6"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+export const FullContentIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    style={{ color: "currentcolor" }}
+  >
+    <path
+      d="M4 3h8M4 6h8M4 9h8M4 12h8"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+export const GitHubActionsIcon = ({ size = 16 }: { size?: number }) => (
+  <svg
+    height={size}
+    width={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    style={{ color: "currentcolor" }}
+  >
+    <circle
+      cx="8"
+      cy="8"
+      r="6.5"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    />
+    <path
+      d="M8 3L9.5 7.5L14 7.5L10.5 10.5L12 15L8 12L4 15L5.5 10.5L2 7.5L6.5 7.5L8 3Z"
+      fill="currentColor"
+    />
+  </svg>
+);

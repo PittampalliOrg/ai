@@ -1,0 +1,200 @@
+# DevSpace Configuration for AI Chatbot
+# Enables Kubernetes-native development with hot-reload
+#
+# Architecture:
+#   - Replaces production container with devcontainer (full build tools)
+#   - Syncs local files to container in real-time
+#   - Runs Next.js dev server with hot module replacement
+#   - Integrates with existing OTEL observability stack
+#
+# Usage:
+#   devenv up          # Start via process-compose (recommended)
+#   devspace dev       # Direct devspace invocation
+#   devspace enter     # Shell into container
+#   devspace purge     # Clean up devspace resources
+
+version: v2beta1
+name: ai-chatbot
+
+# Development configuration
+dev:
+  app:
+    # Target the deployment by image selector (more reliable for workload identification)
+    namespace: ai-chatbot
+    imageSelector: gitea.cnoe.localtest.me:8443/giteaadmin/ai-chatbot
+    container: ai-chatbot
+
+    # Replace production image with devcontainer
+    devImage: gitea.cnoe.localtest.me:8443/giteaadmin/ai-chatbot-devspace:latest
+    workingDir: /app
+
+    # Resource requirements for development
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+      limits:
+        cpu: "4"
+        memory: "8Gi"
+
+    # Command to run in the container
+    # Runs pnpm install (with caching), migrations, then starts dev server
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        echo "=== DevSpace Development Container ==="
+
+        # Install Claude Code CLI globally (for Claude Code provider)
+        echo "Installing Claude Code CLI..."
+        npm install -g @anthropic-ai/claude-code 2>/dev/null || echo "Claude CLI already installed"
+
+        # Always enable corepack and pnpm (required even if node_modules cached)
+        echo "Enabling corepack and pnpm..."
+        corepack enable
+        corepack prepare pnpm@9.12.3 --activate
+
+        echo "Checking dependencies..."
+        # Only install if node_modules is missing or package.json changed
+        if [ ! -d "node_modules" ] || [ ! -f "node_modules/.pnpm-lock-hash" ] || \
+           [ "$(cat node_modules/.pnpm-lock-hash 2>/dev/null)" != "$(md5sum pnpm-lock.yaml | cut -d' ' -f1)" ]; then
+          echo "Installing dependencies..."
+          pnpm install --frozen-lockfile
+          md5sum pnpm-lock.yaml | cut -d' ' -f1 > node_modules/.pnpm-lock-hash
+        else
+          echo "Dependencies up to date (cached)"
+        fi
+
+        # Run database migrations (idempotent - only applies pending migrations)
+        echo "Running database migrations..."
+        pnpm tsx lib/db/migrate || echo "⚠️  Migrations skipped (database may not be ready)"
+
+        echo "Starting Next.js development server..."
+        exec pnpm dev
+
+    # File synchronization
+    # Sync only essential source code to container
+    # Uses emptyDir volume for /app to ensure proper write permissions
+    sync:
+      - path: ./:/app
+        initialSync: mirrorLocal
+        startContainer: true
+        waitInitialSync: true
+        onUpload:
+          restartContainer: false  # Hot-reload handles changes
+        excludePaths:
+          # === NEVER SYNC (large/binary/generated) ===
+          - node_modules/
+          - .pnpm-store/
+          - .next/
+          - dist/
+          - out/
+          - coverage/
+          - next-env.d.ts
+          # === DEV TOOLING (not needed in container) ===
+          - .devenv/
+          - .devspace/
+          - .direnv/
+          - .git
+          - .git/
+          - .github/
+          - .idea/
+          - .vscode/
+          - .cursor/
+          # === TEST FILES (not needed for dev server) ===
+          - tests/
+          - playwright-report/
+          - test-results/
+          - playwright.config.ts
+          - vitest.config.ts
+          # === DOCS & CONFIG (not needed at runtime) ===
+          - docs/
+          - scripts/
+          - "*.md"
+          - "*.log"
+          - LICENSE
+          - Dockerfile
+          - Dockerfile.devspace
+          - devenv.*
+          - devenv.lock
+          - .devenv*
+          - .devenv.flake.nix
+          - biome.jsonc
+          - .dockerignore
+          - .gitignore
+          - .env.local
+          - .env.example
+          - cookies.txt
+
+    # Persistent paths for faster subsequent starts
+    persistPaths:
+      - path: /tmp
+        skipPopulate: true
+      - path: /app/node_modules
+        # Cache node_modules for faster startup
+
+    # Patches to configure the pod for development
+    patches:
+      # Remove health checks (dev server startup is slower)
+      - op: remove
+        path: spec.containers.name=ai-chatbot.livenessProbe
+      - op: remove
+        path: spec.containers.name=ai-chatbot.readinessProbe
+      # Run ai-chatbot container as root for development to avoid permission issues
+      # Keep pod-level securityContext compatible with Dapr sidecar (non-root)
+      - op: replace
+        path: spec.containers.name=ai-chatbot.securityContext
+        value:
+          runAsUser: 0
+          runAsGroup: 0
+          runAsNonRoot: false
+          allowPrivilegeEscalation: false
+      # Keep pod fsGroup for volume permissions, but allow non-root override per container
+      - op: replace
+        path: spec.securityContext
+        value:
+          fsGroup: 1001
+          runAsNonRoot: false
+    # Port forwarding for development
+    ports:
+      - port: "3000"  # Next.js dev server
+
+    # SSH access for debugging
+    ssh:
+      enabled: true
+      localPort: 2222
+
+    # Environment variables for development
+    # Note: OTEL config comes from ConfigMap-otel-config.yaml in the cluster
+    # We only override environment-specific values here
+    env:
+      - name: NODE_ENV
+        value: development
+      - name: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      # Allow self-signed certificates for local K8s ingress
+      - name: NODE_TLS_REJECT_UNAUTHORIZED
+        value: "0"
+      # Override OTEL service name and environment for dev
+      - name: OTEL_SERVICE_NAME
+        value: "ai-chatbot-dev"
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "deployment.environment=development,service.namespace=ai-chatbot-dev,service.version=dev"
+      # Enable K8s sandbox mode for agent execution
+      - name: SANDBOX_MODE
+        value: "k8s"
+      - name: SANDBOX_NAMESPACE
+        value: "agent-sandbox"
+      # Enable Dapr Workflow for Ralph Loop
+      - name: DAPR_WORKFLOW_ENABLED
+        value: "true"
+      - name: DAPR_WORKFLOW_STATE_STORE
+        value: "workflowstatestore"
+      # Redis configuration for workflow API (pointing to dapr-agents Redis)
+      - name: REDIS_HOST
+        value: "redis-service.dapr-agents.svc.cluster.local"
+      - name: REDIS_PORT
+        value: "6379"
+      - name: WORKFLOW_STATE_KEY
+        value: "workflow-llm||llm.orchestrator:LLMOrchestrator:workflow_state"

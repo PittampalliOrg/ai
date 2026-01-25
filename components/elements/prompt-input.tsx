@@ -50,25 +50,22 @@ export const PromptInputTextarea = ({
 }: PromptInputTextareaProps) => {
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
     if (e.key === "Enter") {
+      // Don't submit if IME composition is in progress
       if (e.nativeEvent.isComposing) {
         return;
       }
 
       if (e.shiftKey) {
+        // Allow newline
         return;
       }
 
+      // Submit on Enter (without Shift)
       e.preventDefault();
-
       const form = e.currentTarget.form;
-      const submitButton = form?.querySelector(
-        'button[type="submit"]'
-      ) as HTMLButtonElement | null;
-      if (submitButton?.disabled) {
-        return;
+      if (form) {
+        form.requestSubmit();
       }
-
-      form?.requestSubmit();
     }
   };
 

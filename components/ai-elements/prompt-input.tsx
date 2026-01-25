@@ -154,7 +154,8 @@ export function PromptInputProvider({
     (FileUIPart & { id: string })[]
   >([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const openRef = useRef<() => void>(() => undefined);
+  // biome-ignore lint/suspicious/noEmptyBlockStatements: noop initializer
+  const openRef = useRef<() => void>(() => {});
 
   const add = useCallback((files: File[] | FileList) => {
     const incoming = Array.from(files);
@@ -308,18 +309,18 @@ export function PromptInputAttachment({
           {...props}
         >
           <div className="relative size-5 shrink-0">
-            <div className="flex overflow-hidden absolute inset-0 justify-center items-center rounded transition-opacity size-5 bg-background group-hover:opacity-0">
+            <div className="absolute inset-0 flex size-5 items-center justify-center overflow-hidden rounded bg-background transition-opacity group-hover:opacity-0">
               {isImage ? (
                 /* biome-ignore lint/performance/noImgElement: dynamic user uploads */
                 <img
                   alt={filename || "attachment"}
-                  className="object-cover size-5"
+                  className="size-5 object-cover"
                   height={20}
                   src={data.url}
                   width={20}
                 />
               ) : (
-                <div className="flex justify-center items-center size-5 text-muted-foreground">
+                <div className="flex size-5 items-center justify-center text-muted-foreground">
                   <PaperclipIcon className="size-3" />
                 </div>
               )}
@@ -342,14 +343,14 @@ export function PromptInputAttachment({
           <span className="flex-1 truncate">{attachmentLabel}</span>
         </div>
       </HoverCardTrigger>
-      <PromptInputHoverCardContent className="p-2 w-auto">
-        <div className="space-y-3 w-auto">
+      <PromptInputHoverCardContent className="w-auto p-2">
+        <div className="w-auto space-y-3">
           {isImage && (
-            <div className="flex overflow-hidden justify-center items-center w-96 max-h-96 rounded-md border">
+            <div className="flex max-h-96 w-96 items-center justify-center overflow-hidden rounded-md border">
               {/* biome-ignore lint/performance/noImgElement: dynamic user uploads */}
               <img
                 alt={filename || "attachment preview"}
-                className="object-contain max-w-full max-h-full"
+                className="max-h-full max-w-full object-contain"
                 height={384}
                 src={data.url}
                 width={448}
@@ -358,11 +359,11 @@ export function PromptInputAttachment({
           )}
           <div className="flex items-center gap-2.5">
             <div className="min-w-0 flex-1 space-y-1 px-0.5">
-              <h4 className="text-sm font-semibold leading-none truncate">
+              <h4 className="truncate font-semibold text-sm leading-none">
                 {filename || (isImage ? "Image" : "Attachment")}
               </h4>
               {data.mediaType && (
-                <p className="font-mono text-xs truncate text-muted-foreground">
+                <p className="truncate font-mono text-muted-foreground text-xs">
                   {data.mediaType}
                 </p>
               )}
@@ -394,7 +395,7 @@ export function PromptInputAttachments({
 
   return (
     <div
-      className={cn("flex flex-wrap gap-2 items-center p-3 w-full", className)}
+      className={cn("flex w-full flex-wrap items-center gap-2 p-3", className)}
       {...props}
     >
       {attachments.files.map((file) => (
@@ -912,7 +913,7 @@ export const PromptInputTextarea = ({
 
   return (
     <InputGroupTextarea
-      className={cn("max-h-48 field-sizing-content min-h-16", className)}
+      className={cn("field-sizing-content max-h-48 min-h-16", className)}
       name="message"
       onCompositionEnd={() => setIsComposing(false)}
       onCompositionStart={() => setIsComposing(true)}
@@ -936,7 +937,7 @@ export const PromptInputHeader = ({
 }: PromptInputHeaderProps) => (
   <InputGroupAddon
     align="block-end"
-    className={cn("flex-wrap order-first gap-1", className)}
+    className={cn("order-first flex-wrap gap-1", className)}
     {...props}
   />
 );
@@ -952,7 +953,7 @@ export const PromptInputFooter = ({
 }: PromptInputFooterProps) => (
   <InputGroupAddon
     align="block-end"
-    className={cn("gap-1 justify-between", className)}
+    className={cn("justify-between gap-1", className)}
     {...props}
   />
 );
@@ -963,7 +964,7 @@ export const PromptInputTools = ({
   className,
   ...props
 }: PromptInputToolsProps) => (
-  <div className={cn("flex gap-1 items-center", className)} {...props} />
+  <div className={cn("flex items-center gap-1", className)} {...props} />
 );
 
 export type PromptInputButtonProps = ComponentProps<typeof InputGroupButton>;
@@ -1045,7 +1046,7 @@ export const PromptInputSubmit = ({
   let Icon = <CornerDownLeftIcon className="size-4" />;
 
   if (status === "submitted") {
-    Icon = <Loader2Icon className="animate-spin size-4" />;
+    Icon = <Loader2Icon className="size-4 animate-spin" />;
   } else if (status === "streaming") {
     Icon = <SquareIcon className="size-4" />;
   } else if (status === "error") {
@@ -1110,6 +1111,7 @@ interface SpeechRecognitionErrorEvent extends Event {
 }
 
 declare global {
+  // biome-ignore lint/nursery/useConsistentTypeDefinitions: global augmentation requires interface
   interface Window {
     SpeechRecognition: {
       new (): SpeechRecognition;
@@ -1242,7 +1244,7 @@ export const PromptInputSelectTrigger = ({
 }: PromptInputSelectTriggerProps) => (
   <SelectTrigger
     className={cn(
-      "font-medium bg-transparent border-none shadow-none transition-colors text-muted-foreground",
+      "border-none bg-transparent font-medium text-muted-foreground shadow-none transition-colors",
       "hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground",
       className
     )}
@@ -1330,7 +1332,7 @@ export const PromptInputTabLabel = ({
 }: PromptInputTabLabelProps) => (
   <h3
     className={cn(
-      "px-3 mb-2 text-xs font-medium text-muted-foreground",
+      "mb-2 px-3 font-medium text-muted-foreground text-xs",
       className
     )}
     {...props}
@@ -1354,7 +1356,7 @@ export const PromptInputTabItem = ({
 }: PromptInputTabItemProps) => (
   <div
     className={cn(
-      "flex gap-2 items-center px-3 py-2 text-xs hover:bg-accent",
+      "flex items-center gap-2 px-3 py-2 text-xs hover:bg-accent",
       className
     )}
     {...props}
