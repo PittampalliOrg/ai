@@ -24,6 +24,7 @@ export type WorkflowStreamEventType =
   | "task_progress"
   | "task_completed"
   | "heartbeat"
+  | "stream_timeout"
   | "error";
 
 /**
@@ -396,6 +397,8 @@ export function getEventTypeLabel(type: WorkflowStreamEventType): string {
       return "Completed";
     case "heartbeat":
       return "Heartbeat";
+    case "stream_timeout":
+      return "Stream Timeout";
     case "error":
       return "Error";
     default:
@@ -422,6 +425,8 @@ export function getEventTypeColor(type: WorkflowStreamEventType): string {
       return "text-emerald-600";
     case "heartbeat":
       return "text-gray-400";
+    case "stream_timeout":
+      return "text-orange-500";
     case "error":
       return "text-red-600";
     default:

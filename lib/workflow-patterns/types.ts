@@ -190,6 +190,8 @@ export interface SequentialOutput {
     tasksCompleted: number;
     tasksTotal: number;
     filesChanged: string[];
+    /** Indicates if DurableAgent was used for fault-tolerant execution */
+    durableExecution?: boolean;
   };
 }
 

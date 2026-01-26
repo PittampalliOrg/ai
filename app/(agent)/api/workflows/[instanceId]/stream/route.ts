@@ -10,6 +10,9 @@
  */
 
 import { type NextRequest } from "next/server";
+
+// Allow long-running SSE streams (30 minutes)
+export const maxDuration = 1800;
 import {
   getWorkflowPatternState,
   isWorkflowPatternsRuntimeInitialized,
@@ -17,6 +20,7 @@ import {
   type WorkflowRuntimeStatus,
 } from "@/lib/workflow-patterns/runtime";
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
+import { getWorkflowEvents } from "@/app/api/webhooks/dapr/workflow-stream/route";
 
 // Workflow orchestrator service configuration
 const WORKFLOW_SERVICE_URL =
@@ -31,6 +35,32 @@ const TERMINAL_STATES: WorkflowRuntimeStatus[] = [
   "FAILED",
   "TERMINATED",
 ];
+
+/**
+ * Map planner-agent event types to stream event types.
+ * The planner-agent uses snake_case event types like "tool_call", "execution_started".
+ * We normalize these to our stream event types.
+ */
+function mapEventType(type: string): string {
+  const typeMap: Record<string, string> = {
+    // Tool events
+    tool_call: "tool_call",
+    tool_result: "tool_result",
+    // Task events
+    task_started: "task_progress",
+    task_completed: "task_completed",
+    task_failed: "error",
+    // Execution events
+    execution_started: "task_progress",
+    execution_completed: "task_completed",
+    execution_failed: "error",
+    // File events
+    file_changed: "tool_result",
+    // LLM events
+    llm_chunk: "llm_chunk",
+  };
+  return typeMap[type] || type;
+}
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
@@ -218,11 +248,12 @@ async function streamWorkflowPatterns(instanceId: string): Promise<Response> {
         }
 
         // Poll for updates
-        const pollInterval = 1000; // 1 second
-        const maxPolls = 300; // 5 minutes max
+        const pollInterval = 500; // 500ms for faster event streaming
+        const maxPolls = 3600; // 30 minutes max (matches maxDuration)
         let pollCount = 0;
         let lastStatus = state.runtimeStatus;
         let lastCustomStatus = state.serializedCustomStatus;
+        let lastEventIndex = 0; // Track how many events we've sent
 
         const pollTimer = setInterval(async () => {
           try {
@@ -230,17 +261,48 @@ async function streamWorkflowPatterns(instanceId: string): Promise<Response> {
 
             if (pollCount > maxPolls) {
               clearInterval(pollTimer);
+              // Send timeout as a recoverable event - client should reconnect
               sendEvent("timeout", {
                 id: `timeout-${Date.now()}`,
-                type: "error",
+                type: "stream_timeout",
                 workflowId: instanceId,
-                data: { error: "Stream timeout" },
+                data: {
+                  message: "Stream timeout - please reconnect",
+                  reconnect: true,
+                  lastStatus: lastStatus,
+                  lastCustomStatus: lastCustomStatus,
+                },
                 timestamp: new Date().toISOString(),
               });
               controller.close();
               return;
             }
 
+            // ============================================================
+            // Check for new activity events from pub/sub webhook
+            // ============================================================
+            const activityEvents = getWorkflowEvents(instanceId);
+            if (activityEvents.length > lastEventIndex) {
+              // Send new events
+              const newEvents = activityEvents.slice(lastEventIndex);
+              for (const activityEvent of newEvents) {
+                // Map planner-agent event types to our stream event types
+                const mappedType = mapEventType(activityEvent.type);
+                sendEvent(mappedType, {
+                  id: activityEvent.id || `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  type: mappedType,
+                  workflowId: instanceId,
+                  taskId: activityEvent.taskId,
+                  data: activityEvent.data,
+                  timestamp: activityEvent.timestamp,
+                });
+              }
+              lastEventIndex = activityEvents.length;
+            }
+
+            // ============================================================
+            // Check workflow state changes
+            // ============================================================
             state = await getWorkflowPatternState(instanceId);
 
             if (!state) {

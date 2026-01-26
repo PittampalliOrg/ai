@@ -6,7 +6,7 @@ import { AgentChat } from "@/components/agent/agent-chat";
 import { AgentSessionWrapper } from "@/components/agent/agent-session-wrapper";
 import { AgentExecutionProvider } from "@/contexts/agent-execution-context";
 import { WorkflowExecutionProvider } from "@/contexts/workflow-execution-context";
-import { WorkflowViewerInner } from "@/components/workflow";
+import { AgentWorkflowView } from "@/components/agent/agent-workflow-view";
 
 interface AgentSessionPageProps {
   params: Promise<{ id: string }>;
@@ -81,7 +81,7 @@ async function AgentSessionPage({ params }: AgentSessionPageProps) {
             branchName={agentSession.branchName || targetRepo?.branch}
           >
             <main className="flex-1 overflow-hidden">
-              <WorkflowViewerInner taskPrompt={taskPromptText} />
+              <AgentWorkflowView taskPrompt={taskPromptText} />
             </main>
           </AgentSessionWrapper>
         </div>

@@ -237,6 +237,7 @@ function ParsedEventView({ events }: ParsedEventViewProps) {
       task_progress: [],
       task_completed: [],
       heartbeat: [],
+      stream_timeout: [],
       error: [],
     };
 

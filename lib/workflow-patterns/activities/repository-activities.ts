@@ -3,10 +3,83 @@
  *
  * Dapr Workflow activities for GitHub repository operations.
  * Integrates with planner-agent for clone and planning operations.
+ *
+ * Uses Dapr service invocation for automatic service discovery,
+ * load balancing, and observability.
  */
 
+import { DaprClient, HttpMethod } from "@dapr/dapr";
 import type { WorkflowActivityContext } from "@dapr/dapr";
 import type { SequentialPlan } from "../types";
+
+// ============================================================================
+// Dapr Service Invocation Configuration
+// ============================================================================
+
+/**
+ * Planner Agent App ID for Dapr service invocation.
+ * This enables automatic service discovery - no hardcoded URLs needed.
+ * For cross-namespace invocation, use format: app-id.namespace
+ */
+const PLANNER_AGENT_APP_ID =
+  process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
+
+/**
+ * Singleton DaprClient instance for service invocation.
+ * Reused across all activity calls for connection pooling.
+ */
+let daprClient: DaprClient | null = null;
+
+/**
+ * Get or create the DaprClient singleton.
+ * The client automatically connects to the Dapr sidecar.
+ */
+function getDaprClient(): DaprClient {
+  if (!daprClient) {
+    daprClient = new DaprClient();
+    console.log(
+      `[DaprClient] Initialized for service invocation to: ${PLANNER_AGENT_APP_ID}`
+    );
+  }
+  return daprClient;
+}
+
+/**
+ * Invoke a planner-agent endpoint via Dapr service invocation.
+ * Provides automatic retries, load balancing, and distributed tracing.
+ */
+async function invokePlannerAgent<TRequest extends object, TResponse>(
+  endpoint: string,
+  data: TRequest,
+  method: HttpMethod = HttpMethod.POST
+): Promise<TResponse> {
+  const client = getDaprClient();
+
+  console.log(
+    `[DaprInvoke] Calling ${PLANNER_AGENT_APP_ID}/${endpoint} via Dapr`
+  );
+
+  try {
+    const response = await client.invoker.invoke(
+      PLANNER_AGENT_APP_ID,
+      endpoint,
+      method,
+      data
+    );
+
+    return response as TResponse;
+  } catch (error) {
+    // Enhance error message with Dapr context
+    const message =
+      error instanceof Error ? error.message : "Unknown Dapr invocation error";
+    console.error(
+      `[DaprInvoke] Failed to invoke ${PLANNER_AGENT_APP_ID}/${endpoint}: ${message}`
+    );
+    throw new Error(
+      `Dapr service invocation failed for ${PLANNER_AGENT_APP_ID}/${endpoint}: ${message}`
+    );
+  }
+}
 
 // ============================================================================
 // Types
@@ -64,16 +137,40 @@ export interface ExecutePlanOutput {
   tasksCompleted: number;
   tasksTotal: number;
   filesChanged: string[];
+  durableExecution?: boolean;
   error?: string;
 }
 
 // ============================================================================
-// Configuration
+// Response Types (from planner-agent)
 // ============================================================================
 
-const PLANNER_AGENT_URL =
-  process.env.PLANNER_AGENT_URL ||
-  "http://planner-agent.planner-agent.svc.cluster.local:8080";
+interface CloneApiResponse {
+  path: string;
+  success: boolean;
+  fileCount?: number;
+  error?: string;
+}
+
+interface PlanApiResponse {
+  success?: boolean;
+  plan_id?: string;
+  title?: string;
+  summary?: string;
+  steps_count?: number;
+  status?: string;
+  durable_execution?: boolean;
+  error?: string;
+}
+
+interface ExecuteApiResponse {
+  success: boolean;
+  tasks_completed?: number;
+  tasks_total?: number;
+  files_changed?: string[];
+  durable_execution?: boolean;
+  error?: string;
+}
 
 // ============================================================================
 // Activities
@@ -157,9 +254,14 @@ export async function validateRepositoryActivity(
 }
 
 /**
- * Activity 2: Clone repository via planner-agent
+ * Activity 2: Clone repository via planner-agent (Dapr Service Invocation)
  *
- * Calls the planner-agent service which handles:
+ * Uses Dapr service invocation for:
+ * - Automatic service discovery (no hardcoded URLs)
+ * - Built-in retries and circuit breaking
+ * - Distributed tracing via Dapr sidecars
+ *
+ * The planner-agent handles:
  * - Git clone with auth support
  * - Shallow clone (--depth 1) for performance
  */
@@ -170,38 +272,35 @@ export async function cloneRepositoryActivity(
   const { repository } = input;
 
   console.log(
-    `[cloneRepositoryActivity] Cloning ${repository.owner}/${repository.repo} via planner-agent`
+    `[cloneRepositoryActivity] Cloning ${repository.owner}/${repository.repo} via Dapr service invocation`
   );
 
   try {
-    const response = await fetch(`${PLANNER_AGENT_URL}/api/clone`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const result = await invokePlannerAgent<
+      {
+        owner: string;
+        repo: string;
+        branch: string;
+        token?: string;
       },
-      body: JSON.stringify({
-        owner: repository.owner,
-        repo: repository.repo,
-        branch: repository.branch,
-        token: repository.token,
-      }),
+      CloneApiResponse
+    >("api/clone", {
+      owner: repository.owner,
+      repo: repository.repo,
+      branch: repository.branch,
+      token: repository.token,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(
-        `[cloneRepositoryActivity] planner-agent returned ${response.status}: ${errorText}`
-      );
+    console.log(`[cloneRepositoryActivity] Clone result:`, result);
+
+    if (!result.success) {
       return {
         success: false,
         path: "",
         fileCount: 0,
-        error: `Clone failed: ${response.status} - ${errorText}`,
+        error: result.error || "Clone failed",
       };
     }
-
-    const result = await response.json();
-    console.log(`[cloneRepositoryActivity] Clone result:`, result);
 
     return {
       success: true,
@@ -214,66 +313,69 @@ export async function cloneRepositoryActivity(
       success: false,
       path: "",
       fileCount: 0,
-      error: `Failed to connect to planner-agent: ${error instanceof Error ? error.message : "Unknown error"}`,
+      error: `Dapr service invocation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }
 }
 
 /**
- * Activity 3: Create implementation plan via planner-agent
+ * Activity 3: Create implementation plan via planner-agent (Dapr Service Invocation)
  *
- * Calls the planner-agent service which uses Claude SDK to:
- * - Explore the codebase
- * - Generate an implementation plan
+ * Uses Dapr service invocation for automatic service discovery and tracing.
+ *
+ * Calls the planner-agent durable endpoint which uses DurableAgent to:
+ * - Explore the codebase with fault-tolerant execution
+ * - Generate an implementation plan with persistent state
+ * - Falls back to standard PlannerAgent if Dapr Agents unavailable
  */
 export async function createPlanActivity(
   _context: WorkflowActivityContext,
   input: CreatePlanInput
 ): Promise<CreatePlanOutput> {
   console.log(
-    `[createPlanActivity] Creating plan for ${input.repoPath}`
+    `[createPlanActivity] Creating plan for ${input.repoPath} via Dapr service invocation`
   );
 
   try {
-    const response = await fetch(`${PLANNER_AGENT_URL}/api/plan`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const result = await invokePlannerAgent<
+      {
+        cwd: string;
+        prompt: string;
+        use_durable: boolean;
       },
-      body: JSON.stringify({
-        cwd: input.repoPath,
-        prompt: input.prompt,
-      }),
+      PlanApiResponse
+    >("api/durable/plan", {
+      cwd: input.repoPath,
+      prompt: input.prompt,
+      use_durable: true,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!result.success) {
       console.error(
-        `[createPlanActivity] planner-agent returned ${response.status}: ${errorText}`
+        `[createPlanActivity] planner-agent returned error: ${result.error}`
       );
       return {
         plan: null,
-        error: `Plan creation failed: ${response.status} - ${errorText}`,
+        error: `Plan creation failed: ${result.error}`,
       };
     }
 
-    const result = await response.json();
-    console.log(`[createPlanActivity] Plan created:`, result.plan?.title);
+    console.log(
+      `[createPlanActivity] Plan created:`,
+      result.title,
+      `(durable: ${result.durable_execution})`
+    );
 
-    // Transform the result to match SequentialPlan type
+    // Transform the durable response to match SequentialPlan type
+    // The durable endpoint returns a flattened response structure
     const plan: SequentialPlan = {
-      id: result.plan.id,
-      title: result.plan.title,
-      summary: result.plan.summary,
-      steps: (result.plan.steps || []).map((step: { title: string; description: string; files_affected?: string[]; complexity?: string }) => ({
-        title: step.title,
-        description: step.description,
-        filesAffected: step.files_affected,
-        complexity: step.complexity as "low" | "medium" | "high" | undefined,
-      })),
-      criticalFiles: result.plan.critical_files,
-      considerations: result.plan.considerations,
-      status: result.plan.status || "draft",
+      id: result.plan_id || "plan_1",
+      title: result.title || "Implementation Plan",
+      summary: result.summary || "",
+      steps: [], // Durable endpoint doesn't return steps in the same format
+      criticalFiles: [],
+      considerations: [],
+      status: (result.status as "draft" | "approved" | "rejected") || "draft",
     };
 
     return { plan };
@@ -281,64 +383,60 @@ export async function createPlanActivity(
     console.error(`[createPlanActivity] Error:`, error);
     return {
       plan: null,
-      error: `Failed to create plan: ${error instanceof Error ? error.message : "Unknown error"}`,
+      error: `Dapr service invocation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }
 }
 
 /**
- * Activity 4: Execute an approved plan via planner-agent
+ * Activity 4: Execute an approved plan via planner-agent (Dapr Service Invocation)
  *
- * Calls the planner-agent service which uses Claude SDK to:
- * - Convert the approved plan to tasks
- * - Execute each task with Write, Edit, Bash tools
- * - Stream progress via Dapr pub/sub
+ * Uses Dapr service invocation for automatic service discovery and tracing.
+ * Note: Dapr has its own timeout and retry mechanisms configured via policies.
+ *
+ * Calls the planner-agent durable endpoint which uses DurableAgent to:
+ * - Execute plan with fault-tolerant, resumable activities
+ * - Persistent state via ConversationDaprStateMemory
+ * - Automatic retry mechanisms
+ * - Falls back to standard execution if Dapr Agents unavailable
  */
 export async function executePlanActivity(
   _context: WorkflowActivityContext,
   input: ExecutePlanInput
 ): Promise<ExecutePlanOutput> {
   console.log(
-    `[executePlanActivity] Executing plan ${input.planId} for ${input.repoPath}`
+    `[executePlanActivity] Executing plan ${input.planId} for ${input.repoPath} via Dapr service invocation`
   );
 
   try {
-    // Use a long timeout for execution (30 minutes)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30 * 60 * 1000);
-
-    const response = await fetch(`${PLANNER_AGENT_URL}/api/execute`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const result = await invokePlannerAgent<
+      {
+        cwd: string;
+        plan_id: string;
+        workflow_id: string;
       },
-      body: JSON.stringify({
-        repo_path: input.repoPath,
-        plan_id: input.planId,
-        workflow_id: input.workflowId,
-      }),
-      signal: controller.signal,
+      ExecuteApiResponse
+    >("api/durable/execute", {
+      cwd: input.repoPath,
+      plan_id: input.planId,
+      workflow_id: input.workflowId,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!result.success) {
       console.error(
-        `[executePlanActivity] planner-agent returned ${response.status}: ${errorText}`
+        `[executePlanActivity] planner-agent returned error: ${result.error}`
       );
       return {
         success: false,
-        tasksCompleted: 0,
-        tasksTotal: 0,
-        filesChanged: [],
-        error: `Execution failed: ${response.status} - ${errorText}`,
+        tasksCompleted: result.tasks_completed || 0,
+        tasksTotal: result.tasks_total || 0,
+        filesChanged: result.files_changed || [],
+        error: `Execution failed: ${result.error}`,
       };
     }
 
-    const result = await response.json();
     console.log(
-      `[executePlanActivity] Execution completed: ${result.tasks_completed}/${result.tasks_total} tasks`
+      `[executePlanActivity] Execution completed: ${result.tasks_completed}/${result.tasks_total} tasks (durable: ${result.durable_execution})`
     );
 
     return {
@@ -346,28 +444,18 @@ export async function executePlanActivity(
       tasksCompleted: result.tasks_completed || 0,
       tasksTotal: result.tasks_total || 0,
       filesChanged: result.files_changed || [],
+      durableExecution: result.durable_execution,
       error: result.error,
     };
   } catch (error) {
     console.error(`[executePlanActivity] Error:`, error);
-
-    // Check if it was a timeout
-    if (error instanceof Error && error.name === "AbortError") {
-      return {
-        success: false,
-        tasksCompleted: 0,
-        tasksTotal: 0,
-        filesChanged: [],
-        error: "Execution timed out after 30 minutes",
-      };
-    }
 
     return {
       success: false,
       tasksCompleted: 0,
       tasksTotal: 0,
       filesChanged: [],
-      error: `Failed to execute plan: ${error instanceof Error ? error.message : "Unknown error"}`,
+      error: `Dapr service invocation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }
 }

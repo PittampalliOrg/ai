@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { memo } from "react";
-import { useWindowSize } from "usehooks-ts";
+import { memo, useState, useEffect } from "react";
 import { SidebarToggle } from "@/components/sidebar-toggle";
 import { Button } from "@/components/ui/button";
 import { PlusIcon, VercelIcon } from "./icons";
@@ -22,13 +21,26 @@ function PureChatHeader({
   const router = useRouter();
   const { open } = useSidebar();
 
-  const { width: windowWidth } = useWindowSize();
+  // Use mounted state to avoid hydration mismatch with window-dependent logic
+  const [isMounted, setIsMounted] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  // Show button when sidebar is closed OR on mobile, but only after hydration
+  const showNewChatButton = isMounted && (!open || isMobile);
 
   return (
     <header className="sticky top-0 flex items-center gap-2 bg-background px-2 py-1.5 md:px-2">
       <SidebarToggle />
 
-      {(!open || windowWidth < 768) && (
+      {showNewChatButton && (
         <Button
           className="order-2 ml-auto h-8 px-2 md:order-1 md:ml-0 md:h-fit md:px-2"
           onClick={() => {

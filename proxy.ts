@@ -22,6 +22,11 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Allow Dapr endpoints through without authentication for service mesh communication
+  if (pathname.startsWith("/api/dapr") || pathname.startsWith("/api/webhooks/dapr")) {
+    return NextResponse.next();
+  }
+
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,

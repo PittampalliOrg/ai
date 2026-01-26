@@ -48,7 +48,7 @@ dev:
 
         # Install Claude Code CLI globally (for Claude Code provider)
         echo "Installing Claude Code CLI..."
-        npm install -g @anthropic-ai/claude-code 2>/dev/null || echo "Claude CLI already installed"
+        npm install -g @anthropic-ai/claude-code --prefix /usr/local 2>/dev/null || echo "Claude CLI already installed"
 
         # Always enable corepack and pnpm (required even if node_modules cached)
         echo "Enabling corepack and pnpm..."
