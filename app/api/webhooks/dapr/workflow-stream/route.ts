@@ -12,13 +12,21 @@
  */
 
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  storeWorkflowEvent,
+  getWorkflowEvents,
+  clearWorkflowEvents,
+} from "@/lib/workflow-event-store";
+
+// Re-export for other routes to use
+export { getWorkflowEvents, clearWorkflowEvents };
 
 // ============================================================================
 // Types
 // ============================================================================
 
 interface WorkflowStreamEvent {
-  id: string;
+  id?: string;
   type:
     | "initial"
     | "llm_chunk"
@@ -26,20 +34,40 @@ interface WorkflowStreamEvent {
     | "tool_result"
     | "task_progress"
     | "task_completed"
+    | "task_started"
+    | "task_failed"
+    | "execution_started"
+    | "execution_completed"
+    | "execution_failed"
+    | "file_changed"
     | "heartbeat"
     | "error";
   workflowId: string;
   taskId?: string;
   agentId?: "claude-planner" | "claude-code-agent";
   data: {
+    // LLM chunk fields
     content?: string;
+    text?: string;
+    // Tool call/result fields
     toolName?: string;
     toolInput?: unknown;
     toolOutput?: string;
+    result?: string;
+    callId?: string;
+    isError?: boolean;
+    fullLength?: number;
+    // Task/status fields
     status?: string;
     progress?: number;
     error?: string;
+    // File change fields
+    filePath?: string;
+    operation?: string;
+    // Metadata
     metadata?: Record<string, unknown>;
+    // Allow other fields
+    [key: string]: unknown;
   };
   timestamp: string;
 }
@@ -56,54 +84,6 @@ interface DaprPubSubMessage {
   traceparent?: string;
   tracestate?: string;
   type?: string;
-}
-
-// ============================================================================
-// In-Memory Event Store (for demo/development)
-// In production, use Redis, PostgreSQL, or another persistent store
-// ============================================================================
-
-interface EventStore {
-  events: Map<string, WorkflowStreamEvent[]>;
-  maxEventsPerWorkflow: number;
-}
-
-const eventStore: EventStore = {
-  events: new Map(),
-  maxEventsPerWorkflow: 1000, // Keep last 1000 events per workflow
-};
-
-/**
- * Store an event for a workflow
- */
-function storeEvent(event: WorkflowStreamEvent): void {
-  const workflowId = event.workflowId;
-
-  if (!eventStore.events.has(workflowId)) {
-    eventStore.events.set(workflowId, []);
-  }
-
-  const events = eventStore.events.get(workflowId)!;
-  events.push(event);
-
-  // Trim to max size
-  if (events.length > eventStore.maxEventsPerWorkflow) {
-    events.shift();
-  }
-}
-
-/**
- * Get events for a workflow
- */
-export function getWorkflowEvents(workflowId: string): WorkflowStreamEvent[] {
-  return eventStore.events.get(workflowId) ?? [];
-}
-
-/**
- * Clear events for a workflow
- */
-export function clearWorkflowEvents(workflowId: string): void {
-  eventStore.events.delete(workflowId);
 }
 
 // ============================================================================
@@ -134,13 +114,25 @@ export async function POST(request: NextRequest) {
     }
 
     // Log the event (for debugging)
-    console.log(
-      `[Webhook] Workflow stream event: ${event.type} for workflow ${event.workflowId}`,
-      event.taskId ? `(task: ${event.taskId})` : ""
-    );
+    if (event.type === "tool_call" || event.type === "tool_result") {
+      // Log full data for tool events to debug matching issues
+      console.log(
+        `[Webhook] ${event.type} for workflow ${event.workflowId}:`,
+        JSON.stringify(event.data, null, 2)
+      );
+    } else {
+      console.log(
+        `[Webhook] Workflow stream event: ${event.type} for workflow ${event.workflowId}`,
+        event.taskId ? `(task: ${event.taskId})` : ""
+      );
+    }
 
-    // Store the event
-    storeEvent(event);
+    // Store the event in the shared store (Redis-backed, async)
+    await storeWorkflowEvent(event as Parameters<typeof storeWorkflowEvent>[0]);
+
+    // Verify storage
+    const storedEvents = await getWorkflowEvents(event.workflowId);
+    console.log(`[Webhook] Stored event. Total events for ${event.workflowId}: ${storedEvents.length}`);
 
     // Return success (Dapr expects 200 to acknowledge)
     return NextResponse.json({ success: true });

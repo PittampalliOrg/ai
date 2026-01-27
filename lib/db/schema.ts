@@ -2,6 +2,7 @@ import type { InferSelectModel } from "drizzle-orm";
 import {
   boolean,
   foreignKey,
+  index,
   json,
   pgTable,
   primaryKey,
@@ -29,7 +30,11 @@ export const chat = pgTable("Chat", {
   visibility: varchar("visibility", { enum: ["public", "private"] })
     .notNull()
     .default("private"),
-});
+}, (table) => ({
+  userIdIdx: index("idx_chat_userId").on(table.userId),
+  createdAtIdx: index("idx_chat_createdAt").on(table.createdAt.desc()),
+  userIdCreatedAtIdx: index("idx_chat_userId_createdAt").on(table.userId, table.createdAt.desc()),
+}));
 
 export type Chat = InferSelectModel<typeof chat>;
 
@@ -56,7 +61,12 @@ export const message = pgTable("Message_v2", {
   parts: json("parts").notNull(),
   attachments: json("attachments").notNull(),
   createdAt: timestamp("createdAt").notNull(),
-});
+}, (table) => ({
+  chatIdIdx: index("idx_message_chatId").on(table.chatId),
+  createdAtIdx: index("idx_message_createdAt").on(table.createdAt.asc()),
+  chatIdCreatedAtIdx: index("idx_message_chatId_createdAt").on(table.chatId, table.createdAt.asc()),
+  roleIdx: index("idx_message_role").on(table.role),
+}));
 
 export type DBMessage = InferSelectModel<typeof message>;
 
@@ -96,6 +106,8 @@ export const vote = pgTable(
   (table) => {
     return {
       pk: primaryKey({ columns: [table.chatId, table.messageId] }),
+      chatIdIdx: index("idx_vote_chatId").on(table.chatId),
+      messageIdIdx: index("idx_vote_messageId").on(table.messageId),
     };
   }
 );
@@ -119,6 +131,8 @@ export const document = pgTable(
   (table) => {
     return {
       pk: primaryKey({ columns: [table.id, table.createdAt] }),
+      userIdIdx: index("idx_document_userId").on(table.userId),
+      idCreatedAtIdx: index("idx_document_id_createdAt").on(table.id, table.createdAt.desc()),
     };
   }
 );
@@ -146,6 +160,9 @@ export const suggestion = pgTable(
       columns: [table.documentId, table.documentCreatedAt],
       foreignColumns: [document.id, document.createdAt],
     }),
+    documentIdIdx: index("idx_suggestion_documentId").on(table.documentId),
+    userIdIdx: index("idx_suggestion_userId").on(table.userId),
+    isResolvedIdx: index("idx_suggestion_isResolved").on(table.isResolved),
   })
 );
 
@@ -164,6 +181,8 @@ export const stream = pgTable(
       columns: [table.chatId],
       foreignColumns: [chat.id],
     }),
+    chatIdIdx: index("idx_stream_chatId").on(table.chatId),
+    createdAtIdx: index("idx_stream_createdAt").on(table.createdAt.asc()),
   })
 );
 
@@ -181,7 +200,9 @@ export const targetRepository = pgTable("TargetRepository", {
   branch: varchar("branch", { length: 256 }).notNull(),
   installationId: text("installationId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  ownerRepoBranchIdx: index("idx_targetRepository_owner_repo_branch").on(table.owner, table.repo, table.branch),
+}));
 
 export type TargetRepository = InferSelectModel<typeof targetRepository>;
 
@@ -215,7 +236,14 @@ export const agentSession = pgTable("AgentSession", {
   }).default("none"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_agentSession_userId").on(table.userId),
+  createdAtIdx: index("idx_agentSession_createdAt").on(table.createdAt.desc()),
+  userIdCreatedAtIdx: index("idx_agentSession_userId_createdAt").on(table.userId, table.createdAt.desc()),
+  workflowIdIdx: index("idx_agentSession_workflowId").on(table.workflowId),
+  workflowStatusIdx: index("idx_agentSession_workflowStatus").on(table.workflowStatus),
+  sandboxStatusIdx: index("idx_agentSession_sandboxStatus").on(table.sandboxStatus),
+}));
 
 export type AgentSession = InferSelectModel<typeof agentSession>;
 
@@ -228,7 +256,11 @@ export const agentMessage = pgTable("AgentMessage", {
   role: varchar("role", { length: 32 }).notNull(),
   parts: json("parts").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  sessionIdIdx: index("idx_agentMessage_sessionId").on(table.sessionId),
+  createdAtIdx: index("idx_agentMessage_createdAt").on(table.createdAt.asc()),
+  sessionIdCreatedAtIdx: index("idx_agentMessage_sessionId_createdAt").on(table.sessionId, table.createdAt.asc()),
+}));
 
 export type AgentMessage = InferSelectModel<typeof agentMessage>;
 
@@ -243,6 +275,8 @@ export const githubInstallation = pgTable("GitHubInstallation", {
     enum: ["User", "Organization"],
   }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (table) => ({
+  userIdIdx: index("idx_githubInstallation_userId").on(table.userId),
+}));
 
 export type GitHubInstallation = InferSelectModel<typeof githubInstallation>;

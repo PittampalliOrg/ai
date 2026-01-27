@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
                 branch: targetRepository.branch || "main",
               },
               prompt: task,
+              sessionId: agentSession.id, // Pass session ID for streaming events
             };
 
             // Schedule the sequential workflow

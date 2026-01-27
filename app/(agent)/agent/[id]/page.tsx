@@ -67,7 +67,7 @@ async function AgentSessionPage({ params }: AgentSessionPageProps) {
   if (hasWorkflow) {
     return (
       <WorkflowExecutionProvider
-        workflowId={agentSession.workflowId}
+        workflowId={id} // Use session ID - events are published keyed by session ID
         initialTaskPrompt={taskPromptText}
       >
         <div className="flex h-dvh flex-col">

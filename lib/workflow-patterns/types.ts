@@ -86,6 +86,8 @@ export const sequentialInputSchema = z.object({
     token: z.string().optional(),
   }),
   prompt: z.string().min(10, "Prompt must be at least 10 characters"),
+  // Session ID for streaming events to the UI
+  sessionId: z.string().optional(),
   // Dapr advanced options
   humanOptions: humanInTheLoopOptionsSchema,
   timeoutOptions: timeoutOptionsSchema,

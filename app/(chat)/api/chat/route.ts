@@ -40,7 +40,11 @@ import { convertToUIMessages, generateUUID } from "@/lib/utils";
 import { generateTitleFromUserMessage } from "../../actions";
 import { type PostRequestBody, postRequestBodySchema } from "./schema";
 
-export const maxDuration = 60;
+// Extended timeout for Claude Code agent loops which can run for many minutes
+// Claude Code CLI doesn't impose strict timeouts - agent loops run until completion
+// Individual tools have their own timeouts (Bash: 120s default, max 600s)
+// This matches the pattern: agent API (300s), workflow streams (1800s)
+export const maxDuration = 600; // 10 minutes for Claude Code agent operations
 
 let globalStreamContext: ResumableStreamContext | null = null;
 

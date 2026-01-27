@@ -20,7 +20,7 @@ import {
   type WorkflowRuntimeStatus,
 } from "@/lib/workflow-patterns/runtime";
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
-import { getWorkflowEvents } from "@/app/api/webhooks/dapr/workflow-stream/route";
+import { getWorkflowEvents } from "@/lib/workflow-event-store";
 
 // Workflow orchestrator service configuration
 const WORKFLOW_SERVICE_URL =
@@ -54,8 +54,8 @@ function mapEventType(type: string): string {
     execution_started: "task_progress",
     execution_completed: "task_completed",
     execution_failed: "error",
-    // File events
-    file_changed: "tool_result",
+    // File events - keep as separate type, NOT tool_result (to avoid matching confusion)
+    file_changed: "file_changed",
     // LLM events
     llm_chunk: "llm_chunk",
   };
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   // Try workflow-patterns first if enabled
   if (WORKFLOW_PATTERNS_ENABLED) {
     try {
-      // Check if this is a workflow-patterns workflow
+      // Check if this is a workflow-patterns workflow by Dapr workflow ID
       const indexEntry = await getWorkflowFromIndex(instanceId);
 
       if (indexEntry) {
@@ -94,10 +94,32 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         return streamWorkflowPatterns(instanceId);
       }
     } catch (error) {
-      console.log(`[Stream] Not a workflow-patterns workflow: ${instanceId}`);
+      console.log(`[Stream] Not a workflow-patterns workflow by ID: ${instanceId}`);
+    }
+
+    // Also check if there are events stored for this ID (could be a session ID)
+    // Events are now published keyed by session ID from planner-agent
+    // Poll for events with retry since webhook might deliver them after stream connects
+    const maxRetries = 10;
+    const retryDelay = 500;
+
+    for (let i = 0; i < maxRetries; i++) {
+      const existingEvents = await getWorkflowEvents(instanceId);
+      console.log(`[Stream] Event store check for ${instanceId}: ${existingEvents.length} events found (attempt ${i + 1}/${maxRetries})`);
+
+      if (existingEvents.length > 0) {
+        console.log(`[Stream] Streaming ${existingEvents.length} events for session/workflow: ${instanceId}`);
+        return streamSessionEvents(instanceId, request);
+      }
+
+      // Wait before next check
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
     }
   }
 
+  console.log(`[Stream] No events found after retries, falling back to workflow-orchestrator for ${instanceId}`);
   // Fall back to workflow-orchestrator
   return streamWorkflowOrchestrator(instanceId);
 }
@@ -281,13 +303,21 @@ async function streamWorkflowPatterns(instanceId: string): Promise<Response> {
             // ============================================================
             // Check for new activity events from pub/sub webhook
             // ============================================================
-            const activityEvents = getWorkflowEvents(instanceId);
+            const activityEvents = await getWorkflowEvents(instanceId);
             if (activityEvents.length > lastEventIndex) {
               // Send new events
               const newEvents = activityEvents.slice(lastEventIndex);
               for (const activityEvent of newEvents) {
                 // Map planner-agent event types to our stream event types
                 const mappedType = mapEventType(activityEvent.type);
+
+                // Debug: Log tool events with callId
+                if (activityEvent.type === "tool_call" || activityEvent.type === "tool_result") {
+                  console.log(
+                    `[Stream] Forwarding ${activityEvent.type}: toolName=${activityEvent.data?.toolName || "unknown"} callId=${activityEvent.data?.callId || "NONE"}`
+                  );
+                }
+
                 sendEvent(mappedType, {
                   id: activityEvent.id || `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                   type: mappedType,
@@ -404,6 +434,111 @@ async function streamWorkflowPatterns(instanceId: string): Promise<Response> {
       } catch (error) {
         console.error(`[Stream] Error for ${instanceId}:`, error);
         sendError(error instanceof Error ? error.message : "Unknown error");
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
+/**
+ * Stream events for a session ID (without Dapr workflow state)
+ *
+ * This is used when events are published keyed by session ID from planner-agent.
+ * It polls the in-memory event store for new events.
+ */
+async function streamSessionEvents(sessionId: string, request: NextRequest): Promise<Response> {
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      const sendEvent = (event: string, data: unknown) => {
+        const eventData = `data: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(eventData));
+      };
+
+      try {
+        // Send initial state event
+        sendEvent("initial", {
+          id: `init-${Date.now()}`,
+          type: "initial",
+          workflowId: sessionId,
+          data: {
+            status: "RUNNING",
+            content: "Streaming session events",
+          },
+          timestamp: new Date().toISOString(),
+        });
+
+        // Poll for new events
+        const pollInterval = 500;
+        const maxPolls = 3600; // 30 minutes
+        let pollCount = 0;
+        let lastEventIndex = 0;
+
+        const pollTimer = setInterval(async () => {
+          try {
+            pollCount++;
+
+            if (pollCount > maxPolls) {
+              clearInterval(pollTimer);
+              sendEvent("timeout", {
+                id: `timeout-${Date.now()}`,
+                type: "stream_timeout",
+                workflowId: sessionId,
+                data: {
+                  message: "Stream timeout - please reconnect",
+                  reconnect: true,
+                },
+                timestamp: new Date().toISOString(),
+              });
+              controller.close();
+              return;
+            }
+
+            // Check for new events
+            const events = await getWorkflowEvents(sessionId);
+            if (events.length > lastEventIndex) {
+              const newEvents = events.slice(lastEventIndex);
+              for (const event of newEvents) {
+                const mappedType = mapEventType(event.type);
+                sendEvent(mappedType, {
+                  id: event.id || `event-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  type: mappedType,
+                  workflowId: sessionId,
+                  taskId: event.taskId,
+                  data: event.data,
+                  timestamp: event.timestamp,
+                });
+              }
+              lastEventIndex = events.length;
+            }
+          } catch (pollError) {
+            console.error(`[Stream] Poll error for session ${sessionId}:`, pollError);
+          }
+        }, pollInterval);
+
+        // Clean up on close
+        request.signal?.addEventListener("abort", () => {
+          clearInterval(pollTimer);
+        });
+      } catch (error) {
+        console.error(`[Stream] Error for session ${sessionId}:`, error);
+        sendEvent("error", {
+          id: `error-${Date.now()}`,
+          type: "error",
+          workflowId: sessionId,
+          data: { error: error instanceof Error ? error.message : "Unknown error" },
+          timestamp: new Date().toISOString(),
+        });
+        controller.close();
       }
     },
   });

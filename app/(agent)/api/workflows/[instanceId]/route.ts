@@ -55,6 +55,44 @@ const PATTERN_STEPS: Record<string, { id: string; name: string }[]> = {
 };
 
 /**
+ * Extract step-specific output data from workflow output
+ */
+function extractStepOutput(stepId: string, output: unknown): unknown {
+  if (!output || typeof output !== "object") return undefined;
+
+  const outputObj = output as Record<string, unknown>;
+
+  // Try to find step-specific data by common keys
+  const keyMappings: Record<string, string[]> = {
+    validate: ["validation", "validated", "validateResult"],
+    clone: ["repository", "cloneResult", "repo"],
+    plan: ["plan", "planResult", "planning"],
+    approval: ["approval", "approvalResult", "approved"],
+    execute: ["execution", "executeResult", "result"],
+    security: ["security", "securityReview", "securityResult"],
+    performance: ["performance", "performanceReview", "performanceResult"],
+    maintainability: ["maintainability", "maintainabilityReview"],
+    summarize: ["summary", "summarizeResult", "reviews"],
+    classify: ["classification", "classifyResult", "category"],
+    route: ["routing", "routeResult", "handler"],
+    respond: ["response", "respondResult", "answer"],
+    translate: ["translation", "translateResult"],
+    evaluate: ["evaluation", "evaluateResult"],
+    improve: ["improvement", "improveResult", "refined"],
+  };
+
+  // Check for direct match or mapped keys
+  const keysToCheck = [stepId, ...(keyMappings[stepId] || [])];
+  for (const key of keysToCheck) {
+    if (outputObj[key] !== undefined) {
+      return outputObj[key];
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Build execution logs for pattern workflows based on status
  */
 function buildPatternExecutionLogs(
@@ -120,6 +158,11 @@ function buildPatternExecutionLogs(
 
     // Add completed/failed event (if not just started)
     if (stepEvent !== "started") {
+      // Try to extract step-specific output, or use full output for last step
+      const stepOutput = isCompleted
+        ? (extractStepOutput(step.id, output) || (i === steps.length - 1 ? output : undefined))
+        : undefined;
+
       logs.push({
         timestamp: stepEndTime,
         taskId: step.id,
@@ -127,7 +170,7 @@ function buildPatternExecutionLogs(
         message: stepEvent === "completed"
           ? `Completed: ${step.name}`
           : `Failed: ${step.name}`,
-        details: output && isCompleted && i === steps.length - 1 ? output : undefined,
+        details: stepOutput,
       });
     }
   }
@@ -328,16 +371,30 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         submittedAt: state.createdAt.toISOString(),
       } : undefined,
       // Include output in a plan-like structure for the UI
+      // Use PATTERN_STEPS task IDs to match execution logs
       plan: {
         id: instanceId,
         title: planTitle,
         summary: planSummary,
-        tasks: planSteps.map((s, i) => ({
-          id: `step-${i}`,
-          title: s.title,
-          description: s.description,
-          status: state.runtimeStatus === "COMPLETED" ? "completed" as const : "pending" as const,
-        })),
+        tasks: (() => {
+          // Use pattern steps if available (they have matching IDs with execution logs)
+          const patternSteps = PATTERN_STEPS[indexEntry?.workflowType || "unknown"];
+          if (patternSteps && patternSteps.length > 0) {
+            return patternSteps.map((step) => ({
+              id: step.id,  // Use the same ID as execution logs
+              title: step.name,
+              description: `Execute: ${step.name}`,
+              status: state.runtimeStatus === "COMPLETED" ? "completed" as const : "pending" as const,
+            }));
+          }
+          // Fall back to planSteps from output
+          return planSteps.map((s, i) => ({
+            id: `step-${i}`,
+            title: s.title,
+            description: s.description,
+            status: state.runtimeStatus === "COMPLETED" ? "completed" as const : "pending" as const,
+          }));
+        })(),
       },
       // Add execution logs for the graph
       execution: {

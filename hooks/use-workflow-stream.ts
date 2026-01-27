@@ -21,6 +21,7 @@ export type WorkflowStreamEventType =
   | "llm_chunk"
   | "tool_call"
   | "tool_result"
+  | "file_changed"
   | "task_progress"
   | "task_completed"
   | "heartbeat"
@@ -38,12 +39,26 @@ export type AgentId = "claude-planner" | "claude-code-agent";
 export interface WorkflowStreamEventData {
   /** Text content for llm_chunk events */
   content?: string;
+  /** Text content for llm_chunk events (alternate field from backend) */
+  text?: string;
   /** Tool name for tool_call/tool_result events */
   toolName?: string;
   /** Tool input for tool_call events */
   toolInput?: unknown;
-  /** Tool output for tool_result events */
+  /** Tool output for tool_result events (legacy field) */
   toolOutput?: string;
+  /** Tool result for tool_result events (from planner-agent backend) */
+  result?: string;
+  /** Call ID for correlating tool_call with tool_result */
+  callId?: string;
+  /** Whether the tool result is an error */
+  isError?: boolean;
+  /** Full length of result before truncation */
+  fullLength?: number;
+  /** File path for file_changed events */
+  filePath?: string;
+  /** Operation type for file_changed events (create, modify, delete) */
+  operation?: string;
   /** Status message for task_progress events */
   status?: string;
   /** Progress percentage (0-100) */
@@ -187,7 +202,7 @@ export function useWorkflowStream(
     [onStatusChange]
   );
 
-  // Add event to state
+  // Add event to state (with deduplication)
   const addEvent = useCallback(
     (event: WorkflowStreamEvent) => {
       const eventWithReceiveTime: WorkflowStreamEvent = {
@@ -196,6 +211,11 @@ export function useWorkflowStream(
       };
 
       setEvents((prev) => {
+        // Deduplicate by event ID
+        if (event.id && prev.some((e) => e.id === event.id)) {
+          return prev; // Skip duplicate event
+        }
+
         const newEvents = [...prev, eventWithReceiveTime];
         // Trim to max size
         if (newEvents.length > maxEvents) {
@@ -205,9 +225,11 @@ export function useWorkflowStream(
       });
 
       // Update specific state based on event type
-      if (event.type === "llm_chunk" && event.data.content) {
-        setLatestChunk(event.data.content);
-        setAccumulatedText((prev) => prev + event.data.content);
+      // Backend sends llm_chunk with "text" field, but also support "content" for compatibility
+      if (event.type === "llm_chunk" && (event.data.text || event.data.content)) {
+        const chunkText = event.data.text || event.data.content || "";
+        setLatestChunk(chunkText);
+        setAccumulatedText((prev) => prev + chunkText);
       } else if (event.type === "tool_call" && event.data.toolName) {
         setLatestToolCall({
           toolName: event.data.toolName,

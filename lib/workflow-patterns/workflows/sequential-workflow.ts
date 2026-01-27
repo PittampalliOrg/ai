@@ -26,6 +26,7 @@ import type {
 const validateRepositoryActivity = "validateRepositoryActivity";
 const cloneRepositoryActivity = "cloneRepositoryActivity";
 const createPlanActivity = "createPlanActivity";
+const updatePlanStatusActivity = "updatePlanStatusActivity";
 const executePlanActivity = "executePlanActivity";
 
 /**
@@ -132,6 +133,7 @@ export const sequentialWorkflow: TWorkflow = async function* (
   const planResult = (yield ctx.callActivity(createPlanActivity, {
     repoPath: cloneResult.path,
     prompt,
+    workflowId: input.sessionId || ctx.getWorkflowInstanceId(), // Prefer session ID for streaming events
   })) as { plan: SequentialPlan | null; error?: string };
 
   if (!planResult.plan) {
@@ -199,7 +201,46 @@ export const sequentialWorkflow: TWorkflow = async function* (
   }
 
   // ========================================================================
-  // Step 5: Execute the Approved Plan
+  // Step 5: Persist Approval Status to planner-agent
+  // ========================================================================
+
+  ctx.setCustomStatus("Persisting approval status...");
+
+  if (!ctx.isReplaying()) {
+    console.log(`[Sequential Workflow] Persisting approval status for plan ${planResult.plan.id}`);
+  }
+
+  const statusUpdate = (yield ctx.callActivity(updatePlanStatusActivity, {
+    planId: planResult.plan.id,
+    status: "approved",
+    reviewer: (approval as { reviewer?: string }).reviewer,
+    comments: approval.comments,
+  })) as { success: boolean; planId: string; status: string; error?: string };
+
+  if (!statusUpdate.success) {
+    if (!ctx.isReplaying()) {
+      console.log(`[Sequential Workflow] Failed to persist approval status: ${statusUpdate.error}`);
+    }
+    ctx.setCustomStatus(`Failed: Status update - ${statusUpdate.error}`);
+    return {
+      repository: {
+        owner: repository.owner,
+        repo: repository.repo,
+        branch: repository.branch || "main",
+        clonePath: cloneResult.path,
+      },
+      plan: planResult.plan,
+      status: "failed",
+      error: `Failed to persist approval status: ${statusUpdate.error}`,
+    };
+  }
+
+  if (!ctx.isReplaying()) {
+    console.log(`[Sequential Workflow] Approval status persisted successfully`);
+  }
+
+  // ========================================================================
+  // Step 6: Execute the Approved Plan
   // ========================================================================
 
   ctx.setCustomStatus("Executing implementation plan...");
@@ -211,7 +252,7 @@ export const sequentialWorkflow: TWorkflow = async function* (
   const executionResult = (yield ctx.callActivity(executePlanActivity, {
     repoPath: cloneResult.path,
     planId: planResult.plan.id,
-    workflowId: ctx.getWorkflowInstanceId(),
+    workflowId: input.sessionId || ctx.getWorkflowInstanceId(), // Prefer session ID for streaming events
   })) as {
     success: boolean;
     tasksCompleted: number;

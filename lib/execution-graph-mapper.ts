@@ -204,8 +204,17 @@ export function mapExecutionEventsToGraph(
         type: "smoothstep",
         animated: false,
         label: duration || undefined,
-        labelStyle: { fill: "#9ca3af", fontSize: 12 },
-        labelBgStyle: { fill: "transparent" },
+        labelStyle: {
+          fill: "#e5e7eb",
+          fontSize: 13,
+          fontWeight: 500,
+        },
+        labelBgStyle: {
+          fill: "#1a1f2e",
+          fillOpacity: 0.9,
+        },
+        labelBgPadding: [4, 8] as [number, number],
+        labelBgBorderRadius: 4,
         style: { stroke: "#2dd4bf", strokeWidth: 2 },
         markerEnd: {
           type: "arrowclosed" as const,

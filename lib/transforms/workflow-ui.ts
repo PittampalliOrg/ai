@@ -9,6 +9,7 @@ import type {
   WorkflowStatus,
   ExecutionLog,
   WorkflowListItem as InternalWorkflowListItem,
+  PlanTask,
 } from "@/lib/types/workflow";
 import type {
   WorkflowUIStatus,
@@ -250,29 +251,52 @@ export function mapExecutionLogsToEvents(
   logs: ExecutionLog[],
   workflowStart: string,
   workflowEnd?: string | null,
-  workflowStatus?: WorkflowStatus
+  workflowStatus?: WorkflowStatus,
+  tasks?: PlanTask[],
+  workflowInput?: unknown
 ): DaprExecutionEvent[] {
   const events: DaprExecutionEvent[] = [];
   let eventId = 1;
 
-  // Add OrchestratorStarted event
+  // Create a map of taskId to task for quick lookup
+  const taskMap = new Map<string, PlanTask>();
+  if (tasks) {
+    for (const task of tasks) {
+      taskMap.set(task.id, task);
+    }
+  }
+
+  // Add OrchestratorStarted event with workflow input
   events.push({
     eventId: null,
     eventType: "OrchestratorStarted",
     name: null,
     timestamp: workflowStart,
+    input: workflowInput,
     metadata: {},
   });
 
   // Process execution logs
   for (const log of logs) {
     const eventType = mapExecutionLogEvent(log.event);
+    const task = log.taskId ? taskMap.get(log.taskId) : undefined;
+
+    // Build input from task information
+    const input = task
+      ? {
+          taskId: task.id,
+          title: task.title,
+          description: task.description,
+          dependsOn: task.dependsOn,
+        }
+      : undefined;
 
     events.push({
       eventId: eventType === "TaskScheduled" ? null : eventId++,
       eventType,
       name: log.taskId || null,
       timestamp: log.timestamp,
+      input,
       output: log.details,
       metadata: {
         status: log.event,
@@ -457,11 +481,14 @@ export function toWorkflowDetail(
   };
 
   // Build execution history using the correct start time
+  // Pass plan tasks and workflow request for input data
   const executionHistory = mapExecutionLogsToEvents(
     workflow.execution?.logs || [],
     listItem.startTime,
     listItem.endTime,
-    workflow.status
+    workflow.status,
+    workflow.plan?.tasks,
+    workflow.request ? { prompt: workflow.request.prompt } : undefined
   );
 
   return {

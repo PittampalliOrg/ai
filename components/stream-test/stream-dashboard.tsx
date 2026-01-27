@@ -234,6 +234,7 @@ function ParsedEventView({ events }: ParsedEventViewProps) {
       llm_chunk: [],
       tool_call: [],
       tool_result: [],
+      file_changed: [],
       task_progress: [],
       task_completed: [],
       heartbeat: [],

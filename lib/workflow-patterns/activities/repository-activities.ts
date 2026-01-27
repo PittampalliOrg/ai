@@ -119,6 +119,7 @@ export interface CloneRepositoryOutput {
 export interface CreatePlanInput {
   repoPath: string;
   prompt: string;
+  workflowId?: string; // UI workflow ID for streaming events
 }
 
 export interface CreatePlanOutput {
@@ -138,6 +139,20 @@ export interface ExecutePlanOutput {
   tasksTotal: number;
   filesChanged: string[];
   durableExecution?: boolean;
+  error?: string;
+}
+
+export interface UpdatePlanStatusInput {
+  planId: string;
+  status: "approved" | "rejected";
+  reviewer?: string;
+  comments?: string;
+}
+
+export interface UpdatePlanStatusOutput {
+  success: boolean;
+  planId: string;
+  status: string;
   error?: string;
 }
 
@@ -169,6 +184,13 @@ interface ExecuteApiResponse {
   tasks_total?: number;
   files_changed?: string[];
   durable_execution?: boolean;
+  error?: string;
+}
+
+interface PlanStatusUpdateApiResponse {
+  success: boolean;
+  plan_id: string;
+  status: string;
   error?: string;
 }
 
@@ -342,12 +364,14 @@ export async function createPlanActivity(
         cwd: string;
         prompt: string;
         use_durable: boolean;
+        workflow_id?: string;
       },
       PlanApiResponse
     >("api/durable/plan", {
       cwd: input.repoPath,
       prompt: input.prompt,
       use_durable: true,
+      workflow_id: input.workflowId, // Pass UI workflow ID for streaming
     });
 
     if (!result.success) {
@@ -455,6 +479,69 @@ export async function executePlanActivity(
       tasksCompleted: 0,
       tasksTotal: 0,
       filesChanged: [],
+      error: `Dapr service invocation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+    };
+  }
+}
+
+/**
+ * Activity 5: Update plan status via planner-agent (Dapr Service Invocation)
+ *
+ * This activity is called after the user approves/rejects a plan to persist
+ * the status to planner-agent storage. This ensures the plan status is
+ * correctly set before execution begins.
+ *
+ * Uses Dapr service invocation for automatic service discovery and tracing.
+ */
+export async function updatePlanStatusActivity(
+  _context: WorkflowActivityContext,
+  input: UpdatePlanStatusInput
+): Promise<UpdatePlanStatusOutput> {
+  console.log(
+    `[updatePlanStatusActivity] Updating plan ${input.planId} status to ${input.status}`
+  );
+
+  try {
+    const result = await invokePlannerAgent<
+      {
+        status: string;
+        reviewer?: string;
+        comments?: string;
+      },
+      PlanStatusUpdateApiResponse
+    >(`api/plan/${input.planId}/approve`, {
+      status: input.status,
+      reviewer: input.reviewer,
+      comments: input.comments,
+    });
+
+    if (!result.success) {
+      console.error(
+        `[updatePlanStatusActivity] planner-agent returned error: ${result.error}`
+      );
+      return {
+        success: false,
+        planId: input.planId,
+        status: "",
+        error: `Status update failed: ${result.error}`,
+      };
+    }
+
+    console.log(
+      `[updatePlanStatusActivity] Plan ${input.planId} status updated to ${result.status}`
+    );
+
+    return {
+      success: true,
+      planId: result.plan_id,
+      status: result.status,
+    };
+  } catch (error) {
+    console.error(`[updatePlanStatusActivity] Error:`, error);
+    return {
+      success: false,
+      planId: input.planId,
+      status: "",
       error: `Dapr service invocation failed: ${error instanceof Error ? error.message : "Unknown error"}`,
     };
   }

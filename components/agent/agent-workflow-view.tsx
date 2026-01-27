@@ -154,7 +154,7 @@ const AgentWorkflowSidebar = memo(function AgentWorkflowSidebar({
       <div className="border-b border-zinc-800" />
 
       {/* Phase Indicator */}
-      <AgentPhaseIndicator events={events} />
+      <AgentPhaseIndicator events={events} workflowId={workflowId} />
 
       {/* Divider */}
       <div className="border-b border-zinc-800" />

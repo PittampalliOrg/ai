@@ -4,16 +4,15 @@
  * EventDetailsPanel Component
  *
  * Side panel for displaying selected event details.
- * Shows event type, name, timestamp, output, and metadata.
+ * Matches Diagrid Catalyst style with prominent Input/Output panels.
  */
 
-import { X, Clock, Tag, Hash, Info, ChevronDown, ChevronRight } from "lucide-react";
+import { X, Info, Copy, Check } from "lucide-react";
 import { useState } from "react";
 import type { DaprExecutionEvent } from "@/lib/types/workflow-ui";
-import { getEventTypeColor } from "@/lib/types/workflow-ui";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { SyntaxHighlightedJson } from "./json-panel";
 
 // ============================================================================
 // Types
@@ -28,57 +27,59 @@ interface EventDetailsPanelProps {
 // Helper Components
 // ============================================================================
 
-interface CollapsibleJsonProps {
+interface JsonPanelProps {
   title: string;
   data: unknown;
-  defaultOpen?: boolean;
 }
 
-function CollapsibleJson({ title, data, defaultOpen = false }: CollapsibleJsonProps) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+function JsonPanel({ title, data }: JsonPanelProps) {
+  const [copied, setCopied] = useState(false);
 
-  if (data === undefined || data === null) {
-    return null;
-  }
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  const hasData = data !== undefined && data !== null;
 
   return (
-    <div className="border rounded-md overflow-hidden">
-      <button
-        type="button"
-        className="flex items-center justify-between w-full px-3 py-2 bg-muted/50 hover:bg-muted transition-colors text-sm font-medium text-left"
-        onClick={() => setIsOpen(!isOpen)}
-      >
-        <span>{title}</span>
-        {isOpen ? (
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+    <div className="border border-border/50 rounded-lg overflow-hidden bg-[#1e2433]">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700">
+        <span className="text-sm font-medium text-gray-300">{title}</span>
+        {hasData && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-teal-400 hover:text-teal-300 hover:bg-transparent"
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3 mr-1" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3 mr-1" />
+                Copy
+              </>
+            )}
+          </Button>
         )}
-      </button>
-      {isOpen && (
-        <div className="p-3 bg-muted/20">
-          <pre className="text-xs font-mono whitespace-pre-wrap break-all overflow-auto max-h-60">
-            {JSON.stringify(data, null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
-interface DetailRowProps {
-  icon: React.ReactNode;
-  label: string;
-  value: React.ReactNode;
-}
-
-function DetailRow({ icon, label, value }: DetailRowProps) {
-  return (
-    <div className="flex items-start gap-3 py-2">
-      <div className="text-muted-foreground mt-0.5">{icon}</div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-medium text-foreground break-all">{value}</p>
+      </div>
+      {/* Content with syntax highlighting */}
+      <div className="p-3 max-h-48 overflow-auto">
+        {hasData ? (
+          <SyntaxHighlightedJson data={data} />
+        ) : (
+          <p className="text-xs text-muted-foreground italic">No data</p>
+        )}
       </div>
     </div>
   );
@@ -89,28 +90,33 @@ function DetailRow({ icon, label, value }: DetailRowProps) {
 // ============================================================================
 
 export function EventDetailsPanel({ event, onClose }: EventDetailsPanelProps) {
-  const eventTypeColor = getEventTypeColor(event.eventType);
-
-  const formattedTimestamp = (() => {
-    try {
-      return new Date(event.timestamp).toLocaleString("en-US", {
-        dateStyle: "medium",
-        timeStyle: "medium",
-      });
-    } catch {
-      return event.timestamp;
-    }
-  })();
+  // Calculate execution time if we have metadata
+  const executionTime = event.metadata?.executionDuration || event.metadata?.elapsed;
 
   return (
-    <div className="h-full flex flex-col bg-card border-l">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b">
-        <h3 className="font-semibold text-foreground">Event Details</h3>
+    <div className="h-full flex flex-col bg-card border-l min-w-[320px]">
+      {/* Header - Activity name with close button */}
+      <div className="flex items-start justify-between px-4 py-3 border-b">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-foreground text-lg truncate">
+            {event.name || event.eventType}
+          </h3>
+          {/* Type Badge */}
+          <div className="mt-1">
+            <Badge
+              variant="outline"
+              className="text-xs bg-teal-500/10 text-teal-400 border-teal-500/30"
+            >
+              {event.eventType === "TaskCompleted" || event.eventType === "TaskScheduled"
+                ? "activity"
+                : event.eventType.toLowerCase().replace("orchestrator", "").replace("execution", "")}
+            </Badge>
+          </div>
+        </div>
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
+          className="h-8 w-8 shrink-0"
           onClick={onClose}
         >
           <X className="h-4 w-4" />
@@ -120,76 +126,20 @@ export function EventDetailsPanel({ event, onClose }: EventDetailsPanelProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* Event Type Badge */}
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className={cn("font-mono", eventTypeColor)}>
-            {event.eventType}
-          </Badge>
-        </div>
+        {/* Execution Time - Prominent like Diagrid */}
+        {executionTime && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Execution time:</span>
+            <span className="font-semibold text-foreground">{executionTime}</span>
+            <Info className="h-3.5 w-3.5 text-muted-foreground" />
+          </div>
+        )}
 
-        {/* Basic Info */}
-        <div className="space-y-1 divide-y">
-          {event.name && (
-            <DetailRow
-              icon={<Tag className="h-4 w-4" />}
-              label="Name"
-              value={event.name}
-            />
-          )}
+        {/* Input Panel - Always visible */}
+        <JsonPanel title="Input" data={event.input} />
 
-          {event.eventId !== null && (
-            <DetailRow
-              icon={<Hash className="h-4 w-4" />}
-              label="Event ID"
-              value={event.eventId}
-            />
-          )}
-
-          <DetailRow
-            icon={<Clock className="h-4 w-4" />}
-            label="Timestamp"
-            value={formattedTimestamp}
-          />
-
-          {event.metadata?.taskId && (
-            <DetailRow
-              icon={<Info className="h-4 w-4" />}
-              label="Task ID"
-              value={event.metadata.taskId}
-            />
-          )}
-
-          {event.metadata?.elapsed && (
-            <DetailRow
-              icon={<Clock className="h-4 w-4" />}
-              label="Elapsed"
-              value={event.metadata.elapsed}
-            />
-          )}
-
-          {event.metadata?.executionDuration && (
-            <DetailRow
-              icon={<Clock className="h-4 w-4" />}
-              label="Duration"
-              value={event.metadata.executionDuration}
-            />
-          )}
-
-          {event.metadata?.status && (
-            <DetailRow
-              icon={<Info className="h-4 w-4" />}
-              label="Status"
-              value={event.metadata.status}
-            />
-          )}
-        </div>
-
-        {/* Collapsible sections */}
-        <div className="space-y-3">
-          <CollapsibleJson title="Input" data={event.input} />
-          <CollapsibleJson title="Output" data={event.output} defaultOpen />
-          <CollapsibleJson title="Metadata" data={event.metadata} />
-        </div>
+        {/* Output Panel - Always visible */}
+        <JsonPanel title="Output" data={event.output} />
       </div>
     </div>
   );

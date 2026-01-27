@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { Check } from "lucide-react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +12,51 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+
+// ============================================================================
+// SyntaxHighlightedJson Component
+// ============================================================================
+
+interface SyntaxHighlightedJsonProps {
+  data: unknown;
+  className?: string;
+  fontSize?: string;
+}
+
+export function SyntaxHighlightedJson({
+  data,
+  className,
+  fontSize = "0.75rem"
+}: SyntaxHighlightedJsonProps) {
+  const jsonString = JSON.stringify(data, null, 2);
+
+  return (
+    <SyntaxHighlighter
+      className={cn("!m-0 !p-0 !bg-transparent", className)}
+      language="json"
+      style={oneDark}
+      customStyle={{
+        margin: 0,
+        padding: 0,
+        fontSize,
+        background: "transparent",
+        overflowX: "auto",
+        overflowWrap: "break-word",
+        wordBreak: "break-all",
+      }}
+      codeTagProps={{
+        className: "font-mono",
+        style: { fontSize },
+      }}
+    >
+      {jsonString}
+    </SyntaxHighlighter>
+  );
+}
+
+// ============================================================================
+// JsonPanel Component
+// ============================================================================
 
 interface JsonPanelProps {
   title: string;
@@ -71,14 +118,12 @@ export function JsonPanel({
           </Button>
         </div>
 
-        {/* Content */}
+        {/* Content with syntax highlighting */}
         <div
-          className="overflow-auto p-4 font-mono text-xs relative"
+          className="overflow-auto p-4 relative"
           style={{ maxHeight }}
         >
-          <pre className="whitespace-pre-wrap break-all text-gray-300">
-            {jsonString}
-          </pre>
+          <SyntaxHighlightedJson data={data} />
 
           {/* Expand button - bottom right */}
           {showExpand && (
@@ -130,10 +175,8 @@ export function JsonPanel({
               )}
             </Button>
           </DialogHeader>
-          <div className="flex-1 overflow-auto rounded-lg border border-gray-700 bg-[#1e2433] p-4 font-mono text-sm">
-            <pre className="whitespace-pre-wrap break-all text-gray-300">
-              {jsonString}
-            </pre>
+          <div className="flex-1 overflow-auto rounded-lg border border-gray-700 bg-[#1e2433] p-4">
+            <SyntaxHighlightedJson data={data} fontSize="0.875rem" />
           </div>
         </DialogContent>
       </Dialog>
