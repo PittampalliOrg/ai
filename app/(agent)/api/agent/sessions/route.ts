@@ -8,21 +8,13 @@ import {
   updateAgentSessionWorkflow,
 } from "@/lib/db/agent-queries";
 import { verifyUserExists } from "@/lib/db/queries";
-import {
-  initializeWorkflowPatternsRuntime,
-  scheduleWorkflowPattern,
-  isWorkflowPatternsRuntimeInitialized,
-} from "@/lib/workflow-patterns/runtime";
-import { registerWorkflow } from "@/lib/workflow-patterns/workflow-index";
-import type { SequentialInput } from "@/lib/workflow-patterns/types";
+import { getRepoAccessToken } from "@/lib/github/app-auth";
 
-// Workflow orchestrator service configuration (legacy fallback)
-const WORKFLOW_SERVICE_URL =
+// Planner agent service configuration (the SINGLE workflow orchestrator)
+// All workflows run in planner-agent for single source of truth
+const PLANNER_AGENT_URL =
   process.env.WORKFLOW_SERVICE_URL ||
-  "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
-
-// Use workflow-patterns by default, fall back to orchestrator if disabled
-const USE_WORKFLOW_PATTERNS = process.env.WORKFLOW_PATTERNS_ENABLED === "true";
+  "http://planner-agent.planner-agent.svc.cluster.local:8080";
 
 /**
  * GET /api/agent/sessions
@@ -98,103 +90,62 @@ export async function POST(request: NextRequest) {
     });
 
     // Start workflow if requested (atomic session + workflow creation)
+    // All workflows run in planner-agent for single source of truth
     if (task && startWorkflow && targetRepository) {
       try {
         console.log(
           `[POST /api/agent/sessions] Starting workflow for session ${agentSession.id}`
         );
+        console.log(
+          `[POST /api/agent/sessions] Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`
+        );
 
-        let workflowId: string | undefined;
-
-        // Try workflow-patterns (Dapr-based sequential workflow) first
-        if (USE_WORKFLOW_PATTERNS) {
-          try {
-            // Initialize runtime if needed
-            if (!isWorkflowPatternsRuntimeInitialized()) {
-              console.log("[POST /api/agent/sessions] Initializing workflow-patterns runtime...");
-              await initializeWorkflowPatternsRuntime();
-            }
-
-            // Build SequentialInput for workflow-patterns
-            const sequentialInput: SequentialInput = {
-              repository: {
-                owner: targetRepository.owner,
-                repo: targetRepository.repo,
-                branch: targetRepository.branch || "main",
-              },
-              prompt: task,
-              sessionId: agentSession.id, // Pass session ID for streaming events
-            };
-
-            // Schedule the sequential workflow
-            workflowId = await scheduleWorkflowPattern(
-              "sequentialWorkflow",
-              sequentialInput
-            );
-
-            console.log(
-              `[POST /api/agent/sessions] Sequential workflow ${workflowId} started via workflow-patterns`
-            );
-
-            // Register in workflow index for listing
-            try {
-              await registerWorkflow(
-                workflowId,
-                "sequentialWorkflow",
-                "sequential",
-                sequentialInput as unknown as Record<string, unknown>
-              );
-            } catch (indexError) {
-              console.error(
-                "[POST /api/agent/sessions] Failed to register in workflow index:",
-                indexError
-              );
-            }
-          } catch (patternsError) {
-            console.error(
-              "[POST /api/agent/sessions] Workflow-patterns failed, falling back to orchestrator:",
-              patternsError
-            );
-            workflowId = undefined; // Clear to try fallback
-          }
+        // Get GitHub access token for repository cloning
+        // Uses GitHub App installation token or falls back to user OAuth token
+        let repoToken: string | undefined;
+        try {
+          const tokenResult = await getRepoAccessToken(targetRepository.owner);
+          repoToken = tokenResult.token;
+          console.log(
+            `[POST /api/agent/sessions] Got ${tokenResult.source} token for ${targetRepository.owner}`
+          );
+        } catch (tokenError) {
+          console.warn(
+            `[POST /api/agent/sessions] Could not get token for ${targetRepository.owner}:`,
+            tokenError
+          );
+          // Continue without token - will fail for private repos
         }
 
-        // Fallback to workflow-orchestrator if patterns disabled or failed
-        if (!workflowId) {
-          const workflowResponse = await fetch(
-            `${WORKFLOW_SERVICE_URL}/api/workflows`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                prompt: task,
-                sessionId: agentSession.id,
-                options: {
-                  targetRepository: {
-                    owner: targetRepository.owner,
-                    repo: targetRepository.repo,
-                    branch: targetRepository.branch,
-                  },
+        // Call planner-agent's workflow API directly
+        // The workflow handles clone → explore → plan → approve → execute
+        const workflowResponse = await fetch(
+          `${PLANNER_AGENT_URL}/api/workflows`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt: task,
+              sessionId: agentSession.id,
+              options: {
+                targetRepository: {
+                  owner: targetRepository.owner,
+                  repo: targetRepository.repo,
+                  branch: targetRepository.branch || "main",
+                  token: repoToken, // Pass token for authenticated clone
                 },
-              }),
-            }
+              },
+            }),
+          }
+        );
+
+        if (workflowResponse.ok) {
+          const workflowData = await workflowResponse.json();
+          const workflowId = workflowData.workflowId;
+          console.log(
+            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-agent`
           );
 
-          if (workflowResponse.ok) {
-            const workflowData = await workflowResponse.json();
-            workflowId = workflowData.workflowId;
-            console.log(
-              `[POST /api/agent/sessions] Workflow ${workflowId} started via orchestrator`
-            );
-          } else {
-            const errorText = await workflowResponse.text();
-            console.error(
-              `[POST /api/agent/sessions] Failed to start workflow: ${workflowResponse.status} - ${errorText}`
-            );
-          }
-        }
-
-        if (workflowId) {
           // Link workflow to session
           await updateAgentSessionWorkflow({
             id: agentSession.id,
@@ -210,6 +161,11 @@ export async function POST(request: NextRequest) {
               workflowStatus: "pending",
             },
           });
+        } else {
+          const errorText = await workflowResponse.text();
+          console.error(
+            `[POST /api/agent/sessions] Failed to start workflow: ${workflowResponse.status} - ${errorText}`
+          );
         }
         // Session created but workflow failed - return session anyway
         // The user can still use the legacy AgentChat view

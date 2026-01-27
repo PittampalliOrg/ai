@@ -2,26 +2,17 @@
  * Workflow Approve API
  *
  * POST /api/workflows/[instanceId]/approve
- * Unified approval for both:
- * 1. workflow-orchestrator service (Ralph workflows)
- * 2. workflow-patterns Dapr runtime (raises plan_approval event)
+ * Proxies approval requests to the planner-agent service.
+ *
+ * The planner-agent workflow uses Dapr's wait_for_external_event pattern.
+ * This endpoint raises the approval event to resume the workflow.
  */
 
 import { NextResponse, type NextRequest } from "next/server";
-import {
-  initializeWorkflowPatternsRuntime,
-  getWorkflowPatternsClient,
-  getWorkflowPatternState,
-  isWorkflowPatternsRuntimeInitialized,
-} from "@/lib/workflow-patterns/runtime";
-import { getWorkflow as getWorkflowFromIndex } from "@/lib/workflow-patterns/workflow-index";
 
-// Workflow orchestrator service configuration
-const WORKFLOW_SERVICE_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
-
-// Enable workflow patterns
-const WORKFLOW_PATTERNS_ENABLED = process.env.WORKFLOW_PATTERNS_ENABLED === "true";
+// Planner agent service configuration (the SINGLE workflow orchestrator)
+const PLANNER_AGENT_URL =
+  process.env.WORKFLOW_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
@@ -31,6 +22,7 @@ interface ApproveWorkflowRequest {
   approved?: boolean;
   comments?: string;
   approvedBy?: string;
+  planId?: string;
 }
 
 interface ApproveWorkflowResponse {
@@ -44,10 +36,14 @@ interface ApproveWorkflowResponse {
 /**
  * POST /api/workflows/[instanceId]/approve
  *
- * Approves or rejects a workflow. The request body can specify:
+ * Approves or rejects a workflow by raising the approval event in planner-agent.
+ * The planner-agent workflow is paused at wait_for_external_event("plan_approval_{planId}").
+ *
+ * Request body:
  * - approved: boolean (default: true)
  * - comments: string (optional feedback)
  * - approvedBy: string (optional user identifier)
+ * - planId: string (optional, defaults to "plan_1")
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const { instanceId } = await params;
@@ -84,92 +80,32 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   // Determine if this is an approval or rejection
   const isApproval = requestBody.approved !== false;
 
-  // Try workflow-patterns first if enabled
-  if (WORKFLOW_PATTERNS_ENABLED) {
-    try {
-      // Check if this is a workflow-patterns workflow
-      const indexEntry = await getWorkflowFromIndex(instanceId);
+  // Plan ID for the event name (default to plan_1 if not provided)
+  const planId = requestBody.planId || "plan_1";
 
-      if (indexEntry) {
-        console.log(`[Workflow Approve] Found workflow-patterns workflow: ${instanceId}`);
-
-        // Initialize runtime if needed
-        if (!isWorkflowPatternsRuntimeInitialized()) {
-          await initializeWorkflowPatternsRuntime();
-        }
-
-        // Get current state to verify it's waiting for approval
-        const state = await getWorkflowPatternState(instanceId);
-
-        if (!state) {
-          return NextResponse.json(
-            {
-              success: false,
-              workflowId: instanceId,
-              error: "Workflow instance not found",
-            } satisfies ApproveWorkflowResponse,
-            { status: 404 }
-          );
-        }
-
-        // Check if workflow is running (waiting for approval)
-        if (state.runtimeStatus !== "RUNNING") {
-          return NextResponse.json(
-            {
-              success: false,
-              workflowId: instanceId,
-              error: `Workflow is not waiting for approval (status: ${state.runtimeStatus})`,
-            } satisfies ApproveWorkflowResponse,
-            { status: 400 }
-          );
-        }
-
-        // Raise the plan_approval event
-        const client = getWorkflowPatternsClient();
-        await client.raiseEvent(instanceId, "plan_approval", {
-          approved: isApproval,
-          comments: requestBody.comments,
-        });
-
-        console.log(`[Workflow Approve] Raised plan_approval event for ${instanceId}: ${isApproval ? "approved" : "rejected"}`);
-
-        return NextResponse.json({
-          success: true,
-          workflowId: instanceId,
-          status: isApproval ? "APPROVED" : "REJECTED",
-          message: isApproval ? "Workflow approved" : "Workflow rejected",
-        } satisfies ApproveWorkflowResponse);
-      }
-    } catch (patternsError) {
-      console.log(`[Workflow Approve] Not a workflow-patterns workflow: ${instanceId}`, patternsError);
-      // Fall through to orchestrator
-    }
-  }
-
-  // Fall back to workflow-orchestrator
   try {
-    // Build the appropriate endpoint URL
-    const endpoint = isApproval ? "approve" : "reject";
-    const workflowUrl = `${WORKFLOW_SERVICE_URL}/api/workflows/${instanceId}/${endpoint}`;
+    // Call planner-agent's workflow approval endpoint
+    const approvalUrl = `${PLANNER_AGENT_URL}/api/workflow/${instanceId}/approve`;
 
-    console.log(`[Workflow Approve] ${isApproval ? "Approving" : "Rejecting"} workflow at ${workflowUrl}`);
+    console.log(`[Workflow Approve] Sending ${isApproval ? "approval" : "rejection"} to ${approvalUrl}`);
+    console.log(`[Workflow Approve] Plan ID: ${planId}`);
 
-    // Call the workflow-orchestrator service
-    const response = await fetch(workflowUrl, {
+    const response = await fetch(approvalUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        plan_id: planId,
         approved: isApproval,
-        comments: requestBody.comments,
-        approvedBy: requestBody.approvedBy,
+        reviewer: requestBody.approvedBy,
+        reason: requestBody.comments,
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-      console.error(`[Workflow Approve] Service returned ${response.status}:`, errorData);
+      console.error(`[Workflow Approve] Planner-agent returned ${response.status}:`, errorData);
 
       return NextResponse.json(
         {
@@ -183,13 +119,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     const data = await response.json();
 
-    console.log(`[Workflow Approve] Workflow ${instanceId} ${isApproval ? "approved" : "rejected"}`);
+    console.log(`[Workflow Approve] Workflow ${instanceId} ${isApproval ? "approved" : "rejected"} successfully`);
 
     return NextResponse.json({
       success: true,
-      workflowId: data.workflowId || instanceId,
-      status: data.status,
-      message: data.message || (isApproval ? "Workflow approved" : "Workflow rejected"),
+      workflowId: instanceId,
+      status: isApproval ? "APPROVED" : "REJECTED",
+      message: isApproval ? "Plan approved, execution starting" : "Plan rejected",
     } satisfies ApproveWorkflowResponse);
   } catch (error) {
     console.error(`[Workflow Approve] Error:`, error);
@@ -200,7 +136,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         {
           success: false,
           workflowId: instanceId,
-          error: "Cannot connect to workflow service. Make sure workflow-orchestrator is running.",
+          error: "Cannot connect to planner-agent service. Make sure planner-agent is running.",
         } satisfies ApproveWorkflowResponse,
         { status: 503 }
       );

@@ -2,15 +2,22 @@
  * Workflow Start API
  *
  * POST /api/workflows/start
- * Proxies workflow start requests to the workflow-orchestrator service.
+ * Proxies workflow start requests to the planner-agent service.
+ *
+ * This endpoint acts as a thin proxy to planner-agent's /api/workflows endpoint.
+ * The workflow runs entirely in planner-agent, which handles:
+ * - Repository cloning (durable)
+ * - Codebase exploration
+ * - Plan creation
+ * - Approval gate (wait_for_external_event)
+ * - Plan execution
  */
 
 import { NextResponse } from "next/server";
 
-// Workflow orchestrator service configuration
-// Use full DNS name for cross-namespace communication
-const WORKFLOW_SERVICE_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
+// Planner agent service configuration (the SINGLE workflow orchestrator)
+const PLANNER_AGENT_URL =
+  process.env.WORKFLOW_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
 
 export const maxDuration = 60; // Allow up to 60 seconds for workflow scheduling
 
@@ -64,10 +71,10 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Build the workflow service URL
-    const workflowUrl = `${WORKFLOW_SERVICE_URL}/api/workflows`;
+    // Build the planner-agent workflow URL
+    const workflowUrl = `${PLANNER_AGENT_URL}/api/workflows`;
 
-    console.log(`[Workflow Start] Scheduling workflow at ${workflowUrl}`);
+    console.log(`[Workflow Start] Starting workflow via planner-agent at ${workflowUrl}`);
     console.log(`[Workflow Start] Task: ${task.substring(0, 100)}...`);
     if (sessionId) {
       console.log(`[Workflow Start] Session ID: ${sessionId}`);
@@ -76,7 +83,8 @@ export async function POST(request: Request): Promise<Response> {
       console.log(`[Workflow Start] Target Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`);
     }
 
-    // Call the workflow-orchestrator service
+    // Call planner-agent's workflow API
+    // The workflow handles clone internally for durability
     const response = await fetch(workflowUrl, {
       method: "POST",
       headers: {
@@ -96,7 +104,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!response.ok) {
       const errorText = await response.text();
       console.error(
-        `[Workflow Start] Service returned ${response.status}: ${errorText}`
+        `[Workflow Start] Planner-agent returned ${response.status}: ${errorText}`
       );
       return NextResponse.json(
         {
@@ -110,7 +118,7 @@ export async function POST(request: Request): Promise<Response> {
     const data = await response.json();
 
     console.log(
-      `[Workflow Start] Workflow scheduled successfully: ${data.workflowId}`
+      `[Workflow Start] Workflow started successfully: ${data.workflowId}`
     );
 
     return NextResponse.json(
@@ -130,7 +138,7 @@ export async function POST(request: Request): Promise<Response> {
         {
           success: false,
           error:
-            "Cannot connect to workflow service. Make sure workflow-orchestrator is running.",
+            "Cannot connect to planner-agent service. Make sure planner-agent is running.",
         } satisfies StartWorkflowResponse,
         { status: 503 }
       );

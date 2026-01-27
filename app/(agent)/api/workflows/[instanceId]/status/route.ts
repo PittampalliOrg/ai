@@ -10,9 +10,9 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 
-// Planner agent service configuration
+// Planner agent service configuration (uses WORKFLOW_SERVICE_URL for consistency)
 const PLANNER_AGENT_URL =
-  process.env.PLANNER_AGENT_URL || "http://planner-agent.dapr-agents.svc.cluster.local:8000";
+  process.env.WORKFLOW_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
 
 interface WorkflowStatusResponse {
   success: boolean;
@@ -58,8 +58,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       headers: {
         "Content-Type": "application/json",
       },
-      // Short timeout for status checks
-      signal: AbortSignal.timeout(5000),
+      // Timeout for status checks (increased for slow Dapr state lookups)
+      signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
