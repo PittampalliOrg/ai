@@ -84,11 +84,36 @@ function ExecutionDetailView({ appId, instanceId }: ExecutionDetailViewProps) {
   }
 
   if (isError || !workflow) {
+    // Parse error message to extract details if available
+    let errorMessage = "Workflow not found";
+    let errorDetails = "";
+
+    if (error?.message) {
+      try {
+        // Try to parse as JSON error response
+        const parsed = JSON.parse(error.message);
+        errorMessage = parsed.error || error.message;
+        errorDetails = parsed.details || "";
+      } catch {
+        errorMessage = error.message;
+      }
+    }
+
     return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <p className="text-destructive font-medium">
-          {error?.message || "Workflow not found"}
-        </p>
+      <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto text-center px-4">
+        <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-6 w-full">
+          <p className="text-destructive font-medium text-lg mb-2">
+            {errorMessage}
+          </p>
+          {errorDetails && (
+            <p className="text-muted-foreground text-sm mb-4">
+              {errorDetails}
+            </p>
+          )}
+          <p className="text-muted-foreground text-xs mb-4">
+            Instance ID: <code className="font-mono">{instanceId}</code>
+          </p>
+        </div>
         <Button
           variant="outline"
           size="sm"

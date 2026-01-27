@@ -19,11 +19,14 @@ import {
 } from "@/components/ui/tooltip";
 import {
   getStatusVariant,
+  getPhaseLabel,
+  getPhaseColor,
   type WorkflowListItem,
   type WorkflowUIStatus,
 } from "@/lib/types/workflow-ui";
-import { formatTimestamp, formatDateTime } from "@/lib/transforms/workflow-ui";
+import { formatTimestamp, formatDateTime, calculateDuration } from "@/lib/transforms/workflow-ui";
 import { cn } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
 
 // Status icon component
 function StatusIcon({ status }: { status: WorkflowUIStatus }) {
@@ -75,8 +78,9 @@ function WorkflowTableSkeleton() {
           <TableHead>Instance ID</TableHead>
           <TableHead>Type</TableHead>
           <TableHead>App ID</TableHead>
+          <TableHead>Phase</TableHead>
           <TableHead>Start Time</TableHead>
-          <TableHead>End Time</TableHead>
+          <TableHead>Execution Time</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -95,10 +99,13 @@ function WorkflowTableSkeleton() {
               <Skeleton className="h-4 w-28" />
             </TableCell>
             <TableCell>
-              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-24" />
             </TableCell>
             <TableCell>
               <Skeleton className="h-4 w-20" />
+            </TableCell>
+            <TableCell>
+              <Skeleton className="h-4 w-16" />
             </TableCell>
           </TableRow>
         ))}
@@ -113,6 +120,9 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
   const handleClick = () => {
     router.push(`/dapr-workflows/${workflow.appId}/${workflow.instanceId}`);
   };
+
+  const customStatus = workflow.customStatus;
+  const hasPhase = customStatus?.phase;
 
   return (
     <TableRow
@@ -145,6 +155,35 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
       </TableCell>
       <TableCell className="text-gray-400">{workflow.appId}</TableCell>
       <TableCell>
+        {customStatus?.currentTask ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-sm text-blue-400 truncate max-w-[200px]" title={customStatus.currentTask}>
+              {customStatus.currentTask}
+            </span>
+            {customStatus.progress != null && workflow.status === "RUNNING" && (
+              <div className="flex items-center gap-2">
+                <Progress value={customStatus.progress} className="h-1.5 w-16" />
+                <span className="text-xs text-gray-500">{customStatus.progress}%</span>
+              </div>
+            )}
+          </div>
+        ) : hasPhase ? (
+          <div className="flex flex-col gap-1">
+            <span className={cn("text-sm capitalize", getPhaseColor(customStatus.phase))}>
+              {getPhaseLabel(customStatus.phase)}
+            </span>
+            {customStatus.progress != null && workflow.status === "RUNNING" && (
+              <div className="flex items-center gap-2">
+                <Progress value={customStatus.progress} className="h-1.5 w-16" />
+                <span className="text-xs text-gray-500">{customStatus.progress}%</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="text-gray-500">-</span>
+        )}
+      </TableCell>
+      <TableCell>
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="text-gray-400 cursor-help">
@@ -157,15 +196,26 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
         </Tooltip>
       </TableCell>
       <TableCell>
-        {workflow.endTime ? (
+        {workflow.status === "RUNNING" ? (
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="text-gray-400 cursor-help">
-                {formatTimestamp(workflow.endTime)}
+              <span className="text-amber-400 cursor-help font-medium">
+                {calculateDuration(workflow.startTime) || "-"}
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" className="text-xs">
-              {formatDateTime(workflow.endTime)}
+              Running for {calculateDuration(workflow.startTime)}
+            </TooltipContent>
+          </Tooltip>
+        ) : workflow.endTime ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-gray-400 cursor-help">
+                {calculateDuration(workflow.startTime, workflow.endTime) || "-"}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Completed in {calculateDuration(workflow.startTime, workflow.endTime)}
             </TooltipContent>
           </Tooltip>
         ) : (
@@ -201,8 +251,9 @@ export function DaprWorkflowTable({
             <TableHead className="text-gray-400 font-medium">Instance ID</TableHead>
             <TableHead className="text-gray-400 font-medium">Type</TableHead>
             <TableHead className="text-gray-400 font-medium">App ID</TableHead>
+            <TableHead className="text-gray-400 font-medium">Phase</TableHead>
             <TableHead className="text-gray-400 font-medium">Start Time</TableHead>
-            <TableHead className="text-gray-400 font-medium">End Time</TableHead>
+            <TableHead className="text-gray-400 font-medium">Execution Time</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
