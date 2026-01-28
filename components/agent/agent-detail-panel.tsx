@@ -24,6 +24,10 @@ import { DiffView } from "@/components/agent/views/diff-view";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 
+// Progress tab components
+import { AgentPhaseIndicator } from "./agent-phase-indicator";
+import { PlanApprovalSection } from "./plan-approval-section";
+
 // AI Elements for activity display
 import {
   Tool,
@@ -42,7 +46,7 @@ import {
 // Types
 // ============================================================================
 
-export type DetailTabType = "diff" | "logs";
+export type DetailTabType = "diff" | "logs" | "progress";
 
 interface AgentDetailPanelProps {
   activeTab: DetailTabType;
@@ -58,6 +62,13 @@ interface AgentDetailPanelProps {
   accumulatedText: string;
   isStreaming: boolean;
   isConnected: boolean;
+  // Progress tab props
+  workflowId?: string | null;
+  isWorkflowActive?: boolean;
+  isAwaitingApproval?: boolean;
+  workflow?: { plan?: { title?: string; summary?: string; tasks?: Array<{ id: string; subject?: string; title?: string; description?: string }> }; status?: string } | null;
+  statusMessage?: string | null;
+  progress?: number | null;
   className?: string;
 }
 
@@ -228,12 +239,33 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
   const items: ActivityItem[] = [];
   const pendingToolCalls = new Map<string, ActivityItem>();
 
+  // Track current text accumulator per agent so consecutive llm_chunks
+  // merge into one entry, but a non-chunk event flushes to a new entry.
+  const currentText = new Map<string, ActivityItem>();
+
+  const flushText = (agentId?: string) => {
+    if (agentId !== undefined) {
+      const entry = currentText.get(agentId);
+      if (entry && entry.content && entry.content.trim().length > 0) {
+        // already pushed into items
+      }
+      currentText.delete(agentId);
+    } else {
+      currentText.clear();
+    }
+  };
+
+  const flushAllText = () => {
+    currentText.clear();
+  };
+
   for (const event of events) {
     switch (event.type) {
       case "thinking":
+        flushText(event.agentId);
         if (event.data.content || event.data.text) {
           const content = (event.data.content || event.data.text || "") as string;
-          if (content.trim().length > 20) {
+          if (content.trim().length > 0) {
             items.push({
               id: `thinking-${event.id}`,
               type: "thinking",
@@ -248,27 +280,26 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
       case "llm_chunk":
         if (event.data.content) {
           const content = event.data.content as string;
-          if (content.trim().length > 50) {
-            // Accumulate into a single text entry
-            const existingText = items.find(
-              (i) => i.type === "text" && i.agentId === event.agentId
-            );
-            if (existingText) {
-              existingText.content = (existingText.content || "") + content;
-            } else {
-              items.push({
-                id: `text-${event.id}`,
-                type: "text",
-                timestamp: new Date(event.timestamp),
-                content,
-                agentId: event.agentId,
-              });
-            }
+          const agent = event.agentId || "";
+          const existing = currentText.get(agent);
+          if (existing) {
+            existing.content = (existing.content || "") + content;
+          } else {
+            const entry: ActivityItem = {
+              id: `text-${event.id}`,
+              type: "text",
+              timestamp: new Date(event.timestamp),
+              content,
+              agentId: event.agentId,
+            };
+            items.push(entry);
+            currentText.set(agent, entry);
           }
         }
         break;
 
       case "tool_call": {
+        flushText(event.agentId);
         const callId = event.data.callId as string | undefined;
         const toolItem: ActivityItem = {
           id: event.id,
@@ -287,6 +318,7 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
       }
 
       case "tool_result": {
+        flushText(event.agentId);
         const callId = event.data.callId as string | undefined;
         const resultOutput = ((event.data.result || event.data.toolOutput) as string) || "";
         const isError = Boolean(event.data.isError);
@@ -318,6 +350,7 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
       }
 
       case "task_progress":
+        flushAllText();
         items.push({
           id: event.id,
           type: "progress",
@@ -327,6 +360,7 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         break;
 
       case "error":
+        flushAllText();
         items.push({
           id: event.id,
           type: "error",
@@ -396,7 +430,7 @@ const ActivityEntry = memo(function ActivityEntry({ item }: { item: ActivityItem
               <>
                 <ToolOutput
                   output={item.status === "error" ? null : truncateOutput(parsedOutput.main)}
-                  errorText={item.status === "error" ? truncateOutput(parsedOutput.main) : null}
+                  errorText={item.status === "error" ? truncateOutput(parsedOutput.main) : undefined}
                 />
                 {parsedOutput.systemReminders.length > 0 && (
                   <div className="mt-2 pt-2 border-t border-border/50">
@@ -512,6 +546,12 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
   accumulatedText,
   isStreaming,
   isConnected,
+  workflowId,
+  isWorkflowActive,
+  isAwaitingApproval,
+  workflow,
+  statusMessage,
+  progress,
   className,
 }: AgentDetailPanelProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -546,6 +586,20 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
               </span>
             )}
           </TabButton>
+
+          {isWorkflowActive && (
+            <TabButton
+              isActive={activeTab === "progress"}
+              onClick={() => onTabChange("progress")}
+            >
+              <span>Progress</span>
+              {progress !== null && progress !== undefined && (
+                <span className="ml-1.5 text-xs text-muted-foreground">
+                  {progress}%
+                </span>
+              )}
+            </TabButton>
+          )}
         </div>
 
         <button
@@ -575,6 +629,63 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
             isStreaming={isStreaming}
             isConnected={isConnected}
           />
+        )}
+        {activeTab === "progress" && (
+          <div className="h-full overflow-y-auto">
+            <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+              {/* Phase Progress Indicator */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <AgentPhaseIndicator
+                  events={events}
+                  workflowId={workflowId}
+                />
+              </div>
+
+              {/* Status Message */}
+              {statusMessage && (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/30 border border-border">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+                  <p className="text-sm text-muted-foreground">{statusMessage}</p>
+                </div>
+              )}
+
+              {/* Plan Approval Section (when awaiting approval) */}
+              {isAwaitingApproval && (
+                <div className="rounded-lg overflow-hidden border border-amber-500/30">
+                  <PlanApprovalSection
+                    workflowId={workflowId ?? null}
+                    planTitle={workflow?.plan?.title}
+                    planSummary={workflow?.plan?.summary}
+                    planSteps={workflow?.plan?.tasks?.map((t) => ({
+                      id: t.id,
+                      title: t.subject || t.title || "",
+                      description: t.description,
+                    }))}
+                  />
+                </div>
+              )}
+
+              {/* Workflow Info */}
+              {workflow && (
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Workflow ID</span>
+                    <span className="font-mono text-xs">{workflowId}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Status</span>
+                    <span className="capitalize">{workflow.status?.toLowerCase().replace(/_/g, " ")}</span>
+                  </div>
+                  {progress !== null && progress !== undefined && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>Progress</span>
+                      <span>{progress}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

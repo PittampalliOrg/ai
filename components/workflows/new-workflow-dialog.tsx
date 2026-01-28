@@ -23,8 +23,8 @@ import { Plus, Loader2, AlertCircle, Rocket } from "lucide-react";
 
 interface StartWorkflowResponse {
   success: boolean;
-  instanceId?: string;
-  statusUrl?: string;
+  workflowId?: string;
+  status?: string;
   error?: string;
 }
 
@@ -73,8 +73,8 @@ export function NewWorkflowDialog({ onWorkflowStarted }: NewWorkflowDialogProps)
       }
 
       // Success - notify callback first
-      if (data.instanceId) {
-        onWorkflowStarted?.(data.instanceId);
+      if (data.workflowId) {
+        onWorkflowStarted?.(data.workflowId);
       }
 
       // Close dialog and reset state
@@ -83,10 +83,10 @@ export function NewWorkflowDialog({ onWorkflowStarted }: NewWorkflowDialogProps)
       setIsSubmitting(false);
 
       // Navigate to the new workflow after dialog closes
-      if (data.instanceId) {
+      if (data.workflowId) {
         // Small delay to ensure dialog closes before navigation
         setTimeout(() => {
-          router.push(`/workflows/${encodeURIComponent(data.instanceId!)}`);
+          router.push(`/workflows/${encodeURIComponent(data.workflowId!)}`);
         }, 100);
       }
     } catch (err) {

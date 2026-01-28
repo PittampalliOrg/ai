@@ -2,9 +2,9 @@
  * Workflow Approve API
  *
  * POST /api/workflows/[instanceId]/approve
- * Proxies approval requests to the planner-agent service using Dapr service invocation.
+ * Proxies approval requests to the planner-orchestrator service using Dapr service invocation.
  *
- * The planner-agent workflow uses Dapr's wait_for_external_event pattern.
+ * The planner-orchestrator workflow uses Dapr's wait_for_external_event pattern.
  * This endpoint raises the approval event to resume the workflow.
  *
  * Benefits of Dapr service invocation:
@@ -17,9 +17,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent Dapr app ID
+// Planner orchestrator Dapr app ID
 // Use namespace-qualified app ID for cross-namespace Dapr invocation
-const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
+const PLANNER_ORCHESTRATOR_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-orchestrator.planner-agent";
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
@@ -29,7 +29,6 @@ interface ApproveWorkflowRequest {
   approved?: boolean;
   comments?: string;
   approvedBy?: string;
-  planId?: string;
 }
 
 interface ApproveWorkflowResponse {
@@ -43,14 +42,13 @@ interface ApproveWorkflowResponse {
 /**
  * POST /api/workflows/[instanceId]/approve
  *
- * Approves or rejects a workflow by raising the approval event in planner-agent.
- * The planner-agent workflow is paused at wait_for_external_event("plan_approval_{planId}").
+ * Approves or rejects a workflow by raising the approval event in planner-orchestrator.
+ * The orchestrator workflow is paused at wait_for_external_event (24h timeout).
  *
  * Request body:
  * - approved: boolean (default: true)
- * - comments: string (optional feedback)
+ * - comments: string (optional feedback / reason)
  * - approvedBy: string (optional user identifier)
- * - planId: string (optional, defaults to "plan_1")
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
   const { instanceId } = await params;
@@ -87,23 +85,17 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   // Determine if this is an approval or rejection
   const isApproval = requestBody.approved !== false;
 
-  // Plan ID for the event name (default to plan_1 if not provided)
-  const planId = requestBody.planId || "plan_1";
-
   try {
-    // Call planner-agent's workflow approval endpoint via Dapr service invocation
-    console.log(`[Workflow Approve] Invoking ${PLANNER_AGENT_APP_ID} via Dapr service invocation`);
+    // Call planner-orchestrator's workflow approval endpoint via Dapr service invocation
+    console.log(`[Workflow Approve] Invoking ${PLANNER_ORCHESTRATOR_APP_ID} via Dapr service invocation`);
     console.log(`[Workflow Approve] ${isApproval ? "Approving" : "Rejecting"} workflow ${instanceId}`);
-    console.log(`[Workflow Approve] Plan ID: ${planId}`);
 
-    const response = await invokeService<{ success: boolean; plan_id: string; error?: string }>({
-      appId: PLANNER_AGENT_APP_ID,
+    const response = await invokeService<{ success: boolean; error?: string }>({
+      appId: PLANNER_ORCHESTRATOR_APP_ID,
       method: "POST",
-      path: `/api/workflow/${instanceId}/approve`,
+      path: `/api/workflows/${instanceId}/approve`,
       body: {
-        plan_id: planId,
         approved: isApproval,
-        reviewer: requestBody.approvedBy,
         reason: requestBody.comments,
       },
       timeout: 30000,
@@ -111,7 +103,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (!response.ok) {
       const errorMsg = response.data?.error || `Workflow service error: ${response.status}`;
-      console.error(`[Workflow Approve] Planner-agent returned ${response.status}: ${errorMsg}`);
+      console.error(`[Workflow Approve] Orchestrator returned ${response.status}: ${errorMsg}`);
 
       return NextResponse.json(
         {

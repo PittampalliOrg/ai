@@ -39,9 +39,16 @@ export type PlanTaskStatus =
 export interface PlanTask {
   id: string;
   title: string;
+  /** Task subject from orchestrator (maps to title for display) */
+  subject?: string;
   description: string;
   status: PlanTaskStatus;
+  /** @deprecated Use blockedBy instead */
   dependsOn?: string[];
+  /** Task IDs that cannot start until this task completes */
+  blocks?: string[];
+  /** Task IDs that must complete before this task can start */
+  blockedBy?: string[];
   result?: string;
   error?: string;
   startedAt?: string;

@@ -288,9 +288,11 @@ export function mapExecutionLogsToEvents(
     const input = task
       ? {
           taskId: task.id,
-          title: task.title,
+          title: task.subject || task.title,
           description: task.description,
           dependsOn: task.dependsOn,
+          blockedBy: task.blockedBy,
+          blocks: task.blocks,
         }
       : undefined;
 
@@ -379,9 +381,9 @@ export function toWorkflowListItem(
   let workflowType: string;
   let appId: string;
 
-  if (workflow.source === "planner-agent") {
+  if (workflow.source === "planner-agent" || workflow.source === "planner-orchestrator") {
     workflowType = workflow.workflowType || "planningAndExecutionWorkflow";
-    appId = "planner-agent";
+    appId = "planner-orchestrator";
   } else if (workflow.source === "patterns" && workflow.workflowType) {
     workflowType = `${workflow.workflowType}Workflow`;
     appId = "workflow-patterns";
@@ -533,10 +535,17 @@ export function toWorkflowDetail(
 // ============================================================================
 
 /**
- * Planner-agent workflow status response
+ * Planner-orchestrator workflow status response (flat format).
+ * Kept for backwards compatibility with existing imports.
  */
 export interface PlannerAgentStatusResponse {
   runtime_status: string;
+  workflow_id?: string;
+  phase?: string;
+  progress?: number;
+  message?: string;
+  output?: unknown;
+  /** @deprecated The new orchestrator uses flat fields instead of nested custom_status */
   custom_status?: {
     phase?: string;
     progress?: number;
@@ -619,7 +628,7 @@ export function transformAgentSessionToWorkflowListItem(
   return {
     instanceId: session.workflowId || session.id,
     workflowType: "planningAndExecutionWorkflow",
-    appId: "planner-agent",
+    appId: "planner-orchestrator",
     status,
     startTime,
     endTime,
@@ -676,7 +685,7 @@ export function transformAgentSessionToWorkflowListItemWithCache(
   return {
     instanceId: session.workflowId || session.id,
     workflowType: "planningAndExecutionWorkflow",
-    appId: "planner-agent",
+    appId: "planner-orchestrator",
     status,
     startTime,
     endTime,
@@ -687,8 +696,9 @@ export function transformAgentSessionToWorkflowListItemWithCache(
 }
 
 /**
- * Transform AgentSession with planner-agent status response to WorkflowListItem
- * Enriches the basic AgentSession data with real-time status from planner-agent
+ * Transform AgentSession with orchestrator status response to WorkflowListItem
+ * Enriches the basic AgentSession data with real-time status from planner-orchestrator.
+ * Handles both flat (new orchestrator) and nested (legacy) response formats.
  */
 export function transformAgentSessionWithStatus(
   session: AgentSession,
@@ -700,14 +710,16 @@ export function transformAgentSessionWithStatus(
   if (statusResponse) {
     baseItem.status = mapPlannerAgentStatus(statusResponse.runtime_status);
 
-    // Add custom status if available
-    if (statusResponse.custom_status) {
-      const cs = statusResponse.custom_status;
+    // Handle flat orchestrator format (phase/progress/message at top level)
+    const phase = statusResponse.phase || statusResponse.custom_status?.phase;
+    const progress = statusResponse.progress ?? statusResponse.custom_status?.progress;
+    const message = statusResponse.message || statusResponse.custom_status?.message;
+
+    if (phase || progress != null || message) {
       baseItem.customStatus = {
-        phase: (cs.phase || "executing") as WorkflowPhase,
-        progress: cs.progress ?? 0,
-        message: cs.message || "",
-        plan_id: cs.plan_id,
+        phase: (phase || "executing") as WorkflowPhase,
+        progress: progress ?? 0,
+        message: message || "",
       };
     }
 

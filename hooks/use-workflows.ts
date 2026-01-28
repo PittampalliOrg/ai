@@ -120,7 +120,8 @@ export function useWorkflow(
 // ============================================================================
 
 /**
- * Workflow status response from planner-agent
+ * Workflow status response from planner-orchestrator (via status route proxy).
+ * The status route maps the orchestrator's flat response into this nested format.
  */
 export interface WorkflowStatus {
   success: boolean;
@@ -130,9 +131,6 @@ export interface WorkflowStatus {
     phase?: string;
     progress?: number;
     message?: string;
-    plan_id?: string;
-    tasks_completed?: number;
-    tasks_total?: number;
     [key: string]: unknown;
   } | null;
   created_at: string | null;
@@ -153,10 +151,10 @@ export interface UseWorkflowStatusReturn {
 }
 
 /**
- * Hook to fetch deterministic workflow status from the planner-agent
+ * Hook to fetch workflow status from the planner-orchestrator (via status route proxy).
  *
- * This provides the custom_status set via ctx.set_custom_status() in the workflow,
- * which includes phase, progress, and message fields.
+ * The orchestrator returns flat phase/progress/message fields, which the status
+ * route maps into the nested custom_status format for backwards compatibility.
  *
  * @param instanceId - The workflow instance ID
  * @param refreshInterval - Refresh interval in milliseconds (default: 2000)

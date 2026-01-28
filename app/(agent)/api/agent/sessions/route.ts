@@ -8,12 +8,11 @@ import {
   updateAgentSessionWorkflow,
 } from "@/lib/db/agent-queries";
 import { verifyUserExists } from "@/lib/db/queries";
-import { getRepoAccessToken } from "@/lib/github/app-auth";
 import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent Dapr app ID (all workflows run in planner-agent for single source of truth)
-// Use namespace-qualified app ID for cross-namespace Dapr invocation
-const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
+// Planner orchestrator Dapr app ID (cross-namespace Dapr invocation)
+const PLANNER_ORCHESTRATOR_APP_ID =
+  process.env.PLANNER_AGENT_APP_ID || "planner-orchestrator.planner-agent";
 
 /**
  * GET /api/agent/sessions
@@ -89,7 +88,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Start workflow if requested (atomic session + workflow creation)
-    // All workflows run in planner-agent for single source of truth
+    // All workflows run in planner-orchestrator for single source of truth
     if (task && startWorkflow && targetRepository) {
       try {
         console.log(
@@ -99,48 +98,25 @@ export async function POST(request: NextRequest) {
           `[POST /api/agent/sessions] Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`
         );
 
-        // Get GitHub access token for repository cloning
-        // Uses GitHub App installation token or falls back to user OAuth token
-        let repoToken: string | undefined;
-        try {
-          const tokenResult = await getRepoAccessToken(targetRepository.owner);
-          repoToken = tokenResult.token;
-          console.log(
-            `[POST /api/agent/sessions] Got ${tokenResult.source} token for ${targetRepository.owner}`
-          );
-        } catch (tokenError) {
-          console.warn(
-            `[POST /api/agent/sessions] Could not get token for ${targetRepository.owner}:`,
-            tokenError
-          );
-          // Continue without token - will fail for private repos
-        }
-
-        // Call planner-agent's workflow API via Dapr service invocation
-        // The workflow handles clone → explore → plan → approve → execute
-        const workflowResponse = await invokeService<{ workflowId: string; status: string; error?: string }>({
-          appId: PLANNER_AGENT_APP_ID,
+        // Call planner-orchestrator's workflow API via Dapr service invocation
+        // Map: UI sends {task}, orchestrator expects {feature_request, cwd}
+        // The workflow handles plan → persist → approve → execute
+        const workflowResponse = await invokeService<{ workflow_id: string; status: string; error?: string }>({
+          appId: PLANNER_ORCHESTRATOR_APP_ID,
           method: "POST",
           path: "/api/workflows",
           body: {
-            prompt: task,
-            sessionId: agentSession.id,
-            options: {
-              targetRepository: {
-                owner: targetRepository.owner,
-                repo: targetRepository.repo,
-                branch: targetRepository.branch || "main",
-                token: repoToken, // Pass token for authenticated clone
-              },
-            },
+            feature_request: task,
+            cwd: "/app/workspace",
           },
           timeout: 60000,
         });
 
         if (workflowResponse.ok && workflowResponse.data) {
-          const workflowId = workflowResponse.data.workflowId;
+          // Map: orchestrator returns workflow_id (snake_case)
+          const workflowId = workflowResponse.data.workflow_id;
           console.log(
-            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-agent (Dapr)`
+            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-orchestrator (Dapr)`
           );
 
           // Link workflow to session

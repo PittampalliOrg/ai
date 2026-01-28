@@ -1,5 +1,5 @@
 # Pubsub component for workflow events from planner-agent
-# Points to the dapr-agents Redis to receive workflow.stream events
+# Uses the same Redis as the planner-agent's pubsub component for shared topic
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
@@ -10,7 +10,7 @@ spec:
   version: v1
   metadata:
     - name: redisHost
-      value: redis-service.dapr-agents.svc.cluster.local:6379
+      value: redis.ai-chatbot.svc.cluster.local:6379
     - name: redisPassword
       value: ""
 ---
