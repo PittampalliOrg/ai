@@ -2,17 +2,24 @@
  * Workflow Approve API
  *
  * POST /api/workflows/[instanceId]/approve
- * Proxies approval requests to the planner-agent service.
+ * Proxies approval requests to the planner-agent service using Dapr service invocation.
  *
  * The planner-agent workflow uses Dapr's wait_for_external_event pattern.
  * This endpoint raises the approval event to resume the workflow.
+ *
+ * Benefits of Dapr service invocation:
+ * - Automatic mTLS encryption between services
+ * - Built-in retries and circuit breakers
+ * - Distributed tracing for observability
+ * - Service discovery via app-id (no hardcoded URLs)
  */
 
 import { NextResponse, type NextRequest } from "next/server";
+import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent service configuration (the SINGLE workflow orchestrator)
-const PLANNER_AGENT_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
+// Planner agent Dapr app ID
+// Use namespace-qualified app ID for cross-namespace Dapr invocation
+const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
@@ -84,40 +91,37 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const planId = requestBody.planId || "plan_1";
 
   try {
-    // Call planner-agent's workflow approval endpoint
-    const approvalUrl = `${PLANNER_AGENT_URL}/api/workflow/${instanceId}/approve`;
-
-    console.log(`[Workflow Approve] Sending ${isApproval ? "approval" : "rejection"} to ${approvalUrl}`);
+    // Call planner-agent's workflow approval endpoint via Dapr service invocation
+    console.log(`[Workflow Approve] Invoking ${PLANNER_AGENT_APP_ID} via Dapr service invocation`);
+    console.log(`[Workflow Approve] ${isApproval ? "Approving" : "Rejecting"} workflow ${instanceId}`);
     console.log(`[Workflow Approve] Plan ID: ${planId}`);
 
-    const response = await fetch(approvalUrl, {
+    const response = await invokeService<{ success: boolean; plan_id: string; error?: string }>({
+      appId: PLANNER_AGENT_APP_ID,
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      path: `/api/workflow/${instanceId}/approve`,
+      body: {
         plan_id: planId,
         approved: isApproval,
         reviewer: requestBody.approvedBy,
         reason: requestBody.comments,
-      }),
+      },
+      timeout: 30000,
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
-      console.error(`[Workflow Approve] Planner-agent returned ${response.status}:`, errorData);
+      const errorMsg = response.data?.error || `Workflow service error: ${response.status}`;
+      console.error(`[Workflow Approve] Planner-agent returned ${response.status}: ${errorMsg}`);
 
       return NextResponse.json(
         {
           success: false,
           workflowId: instanceId,
-          error: errorData.error || `Workflow service error: ${response.status}`,
+          error: errorMsg,
         } satisfies ApproveWorkflowResponse,
         { status: response.status }
       );
     }
-
-    const data = await response.json();
 
     console.log(`[Workflow Approve] Workflow ${instanceId} ${isApproval ? "approved" : "rejected"} successfully`);
 
@@ -129,18 +133,6 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     } satisfies ApproveWorkflowResponse);
   } catch (error) {
     console.error(`[Workflow Approve] Error:`, error);
-
-    // Check if it's a connection error
-    if (error instanceof TypeError && error.message.includes("fetch")) {
-      return NextResponse.json(
-        {
-          success: false,
-          workflowId: instanceId,
-          error: "Cannot connect to planner-agent service. Make sure planner-agent is running.",
-        } satisfies ApproveWorkflowResponse,
-        { status: 503 }
-      );
-    }
 
     return NextResponse.json(
       {

@@ -1,5 +1,8 @@
 "use client";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import type { ToolUIPart } from "ai";
 import {
   type ComponentProps,
@@ -7,9 +10,6 @@ import {
   type ReactNode,
   useContext,
 } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 type ToolUIPartApproval =
   | {
@@ -39,10 +39,10 @@ type ToolUIPartApproval =
     }
   | undefined;
 
-type ConfirmationContextValue = {
+interface ConfirmationContextValue {
   approval: ToolUIPartApproval;
   state: ToolUIPart["state"];
-};
+}
 
 const ConfirmationContext = createContext<ConfirmationContextValue | null>(
   null
@@ -89,9 +89,9 @@ export const ConfirmationTitle = ({
   <AlertDescription className={cn("inline", className)} {...props} />
 );
 
-export type ConfirmationRequestProps = {
+export interface ConfirmationRequestProps {
   children?: ReactNode;
-};
+}
 
 export const ConfirmationRequest = ({ children }: ConfirmationRequestProps) => {
   const { state } = useConfirmation();
@@ -104,9 +104,9 @@ export const ConfirmationRequest = ({ children }: ConfirmationRequestProps) => {
   return children;
 };
 
-export type ConfirmationAcceptedProps = {
+export interface ConfirmationAcceptedProps {
   children?: ReactNode;
-};
+}
 
 export const ConfirmationAccepted = ({
   children,
@@ -116,8 +116,8 @@ export const ConfirmationAccepted = ({
   // Only show when approved and in response states
   if (
     !approval?.approved ||
-    (state !== "approval-responded" &&
-      state !== "output-denied" &&
+        (state !== "approval-responded" &&
+            state !== "output-denied" &&
       state !== "output-available")
   ) {
     return null;
@@ -126,9 +126,9 @@ export const ConfirmationAccepted = ({
   return children;
 };
 
-export type ConfirmationRejectedProps = {
+export interface ConfirmationRejectedProps {
   children?: ReactNode;
-};
+}
 
 export const ConfirmationRejected = ({
   children,
@@ -138,8 +138,8 @@ export const ConfirmationRejected = ({
   // Only show when rejected and in response states
   if (
     approval?.approved !== false ||
-    (state !== "approval-responded" &&
-      state !== "output-denied" &&
+        (state !== "approval-responded" &&
+            state !== "output-denied" &&
       state !== "output-available")
   ) {
     return null;

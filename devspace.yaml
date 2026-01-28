@@ -166,35 +166,15 @@ dev:
       localPort: 2222
 
     # Environment variables for development
-    # Note: OTEL config comes from ConfigMap-otel-config.yaml in the cluster
-    # We only override environment-specific values here
+    # Only override values that differ from production deployment
+    # All other env vars come from ConfigMaps and the base Deployment
     env:
       - name: NODE_ENV
         value: development
       - name: NEXT_TELEMETRY_DISABLED
         value: "1"
-      # Allow self-signed certificates for local K8s ingress
-      - name: NODE_TLS_REJECT_UNAUTHORIZED
-        value: "0"
       # Override OTEL service name and environment for dev
       - name: OTEL_SERVICE_NAME
         value: "ai-chatbot-dev"
       - name: OTEL_RESOURCE_ATTRIBUTES
         value: "deployment.environment=development,service.namespace=ai-chatbot-dev,service.version=dev"
-      # Enable K8s sandbox mode for agent execution
-      - name: SANDBOX_MODE
-        value: "k8s"
-      - name: SANDBOX_NAMESPACE
-        value: "agent-sandbox"
-      # Enable Dapr Workflow for Ralph Loop
-      - name: DAPR_WORKFLOW_ENABLED
-        value: "true"
-      - name: DAPR_WORKFLOW_STATE_STORE
-        value: "workflowstatestore"
-      # Redis configuration for workflow API (pointing to dapr-agents Redis)
-      - name: REDIS_HOST
-        value: "redis-service.dapr-agents.svc.cluster.local"
-      - name: REDIS_PORT
-        value: "6379"
-      - name: WORKFLOW_STATE_KEY
-        value: "workflow-llm||llm.orchestrator:LLMOrchestrator:workflow_state"

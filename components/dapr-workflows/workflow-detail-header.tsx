@@ -7,9 +7,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   getStatusVariant,
+  getPhaseLabel,
+  getPhaseColor,
   type WorkflowDetail,
 } from "@/lib/types/workflow-ui";
 import { formatDateTime } from "@/lib/transforms/workflow-ui";
+import { Progress } from "@/components/ui/progress";
 
 interface WorkflowDetailHeaderProps {
   workflow: WorkflowDetail;
@@ -77,6 +80,29 @@ export function WorkflowDetailHeader({ workflow }: WorkflowDetailHeaderProps) {
           </Badge>
         </div>
 
+        {/* Phase (for planner-agent workflows) */}
+        {workflow.customStatus?.phase && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Phase</span>
+            <span className={cn("text-sm font-medium capitalize", getPhaseColor(workflow.customStatus.phase))}>
+              {getPhaseLabel(workflow.customStatus.phase)}
+            </span>
+          </div>
+        )}
+
+        {/* Progress (for running planner-agent workflows) */}
+        {workflow.customStatus?.progress != null && workflow.status === "RUNNING" && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">Progress</span>
+            <div className="flex items-center gap-2">
+              <Progress value={workflow.customStatus.progress} className="h-2 w-24" />
+              <span className="text-sm font-medium text-white">
+                {workflow.customStatus.progress}%
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* App ID */}
         <div className="flex flex-col gap-1">
           <span className="text-xs text-gray-500 uppercase tracking-wide">App ID</span>
@@ -113,6 +139,13 @@ export function WorkflowDetailHeader({ workflow }: WorkflowDetailHeaderProps) {
           </span>
         </div>
       </div>
+
+      {/* Message (for planner-agent workflows with custom status) */}
+      {workflow.customStatus?.message && (
+        <div className="py-3 px-4 rounded-lg border border-gray-700 bg-[#1e2433]/50">
+          <span className="text-sm text-gray-300">{workflow.customStatus.message}</span>
+        </div>
+      )}
     </div>
   );
 }

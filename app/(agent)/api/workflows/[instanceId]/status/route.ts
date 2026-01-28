@@ -2,17 +2,24 @@
  * Workflow Status API - Planner Agent
  *
  * GET /api/workflows/[instanceId]/status
- * Fetches deterministic workflow status from the planner-agent service.
+ * Fetches deterministic workflow status from the planner-agent service using Dapr service invocation.
  *
  * This endpoint provides the custom_status set by the workflow via set_custom_status(),
  * which contains the current phase, progress, and message.
+ *
+ * Benefits of Dapr service invocation:
+ * - Automatic mTLS encryption between services
+ * - Built-in retries and circuit breakers
+ * - Distributed tracing for observability
+ * - Service discovery via app-id (no hardcoded URLs)
  */
 
 import { NextResponse, type NextRequest } from "next/server";
+import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent service configuration (uses WORKFLOW_SERVICE_URL for consistency)
-const PLANNER_AGENT_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
+// Planner agent Dapr app ID
+// Use namespace-qualified app ID for cross-namespace Dapr invocation
+const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
 
 interface WorkflowStatusResponse {
   success: boolean;
@@ -50,16 +57,13 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const statusUrl = `${PLANNER_AGENT_URL}/api/workflow/${instanceId}/status`;
-    console.log(`[Workflow Status] Fetching from ${statusUrl}`);
+    console.log(`[Workflow Status] Invoking ${PLANNER_AGENT_APP_ID} via Dapr service invocation`);
 
-    const response = await fetch(statusUrl, {
+    const response = await invokeService<WorkflowStatusResponse>({
+      appId: PLANNER_AGENT_APP_ID,
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      // Timeout for status checks (increased for slow Dapr state lookups)
-      signal: AbortSignal.timeout(15000),
+      path: `/api/workflow/${instanceId}/status`,
+      timeout: 15000,
     });
 
     if (!response.ok) {
@@ -77,8 +81,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         });
       }
 
-      const errorText = await response.text();
-      console.error(`[Workflow Status] Service returned ${response.status}: ${errorText}`);
+      console.error(`[Workflow Status] Service returned ${response.status}: ${response.statusText}`);
       return NextResponse.json({
         success: false,
         instance_id: instanceId,
@@ -90,8 +93,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       });
     }
 
-    const data = (await response.json()) as WorkflowStatusResponse;
-    return NextResponse.json(data);
+    return NextResponse.json(response.data);
   } catch (error) {
     // Connection errors - service may be unavailable
     console.error(`[Workflow Status] Error fetching status:`, error);

@@ -35,7 +35,7 @@ export function DiffToolbar({
     <div className={cn("flex items-center gap-1", className)}>
       {/* View Mode Toggle Group */}
       <TooltipProvider delayDuration={300}>
-        <div className="flex items-center rounded-md border border-zinc-700 bg-zinc-900">
+        <div className="flex items-center rounded-md border border-border bg-muted">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -45,8 +45,8 @@ export function DiffToolbar({
                 className={cn(
                   "h-7 px-2 rounded-none rounded-l-md",
                   viewMode === "unified"
-                    ? "bg-zinc-700 text-white"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    ? "bg-primary/20 text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
                 )}
               >
                 <UnifiedViewIcon size={14} />
@@ -63,10 +63,10 @@ export function DiffToolbar({
                 size="sm"
                 onClick={() => onViewModeChange("split")}
                 className={cn(
-                  "h-7 px-2 rounded-none rounded-r-md border-l border-zinc-700",
+                  "h-7 px-2 rounded-none rounded-r-md border-l border-border",
                   viewMode === "split"
-                    ? "bg-zinc-700 text-white"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    ? "bg-primary/20 text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
                 )}
               >
                 <SplitViewIcon size={14} />
@@ -80,11 +80,11 @@ export function DiffToolbar({
       </TooltipProvider>
 
       {/* Separator */}
-      <div className="w-px h-5 bg-zinc-700 mx-1" />
+      <div className="w-px h-5 bg-border mx-1" />
 
       {/* Content Mode Toggle Group */}
       <TooltipProvider delayDuration={300}>
-        <div className="flex items-center rounded-md border border-zinc-700 bg-zinc-900">
+        <div className="flex items-center rounded-md border border-border bg-muted">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -94,8 +94,8 @@ export function DiffToolbar({
                 className={cn(
                   "h-7 px-2 rounded-none rounded-l-md",
                   contentMode === "incremental"
-                    ? "bg-zinc-700 text-white"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    ? "bg-primary/20 text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
                 )}
               >
                 <IncrementalIcon size={14} />
@@ -112,10 +112,10 @@ export function DiffToolbar({
                 size="sm"
                 onClick={() => onContentModeChange("full")}
                 className={cn(
-                  "h-7 px-2 rounded-none rounded-r-md border-l border-zinc-700",
+                  "h-7 px-2 rounded-none rounded-r-md border-l border-border",
                   contentMode === "full"
-                    ? "bg-zinc-700 text-white"
-                    : "text-zinc-400 hover:text-white hover:bg-zinc-800"
+                    ? "bg-primary/20 text-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
                 )}
               >
                 <FullContentIcon size={14} />

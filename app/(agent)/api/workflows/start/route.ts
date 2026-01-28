@@ -2,7 +2,7 @@
  * Workflow Start API
  *
  * POST /api/workflows/start
- * Proxies workflow start requests to the planner-agent service.
+ * Proxies workflow start requests to the planner-agent service using Dapr service invocation.
  *
  * This endpoint acts as a thin proxy to planner-agent's /api/workflows endpoint.
  * The workflow runs entirely in planner-agent, which handles:
@@ -11,13 +11,20 @@
  * - Plan creation
  * - Approval gate (wait_for_external_event)
  * - Plan execution
+ *
+ * Benefits of Dapr service invocation:
+ * - Automatic mTLS encryption between services
+ * - Built-in retries and circuit breakers
+ * - Distributed tracing for observability
+ * - Service discovery via app-id (no hardcoded URLs)
  */
 
 import { NextResponse } from "next/server";
+import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent service configuration (the SINGLE workflow orchestrator)
-const PLANNER_AGENT_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
+// Planner agent Dapr app ID
+// Use namespace-qualified app ID for cross-namespace Dapr invocation
+const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
 
 export const maxDuration = 60; // Allow up to 60 seconds for workflow scheduling
 
@@ -71,10 +78,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Build the planner-agent workflow URL
-    const workflowUrl = `${PLANNER_AGENT_URL}/api/workflows`;
-
-    console.log(`[Workflow Start] Starting workflow via planner-agent at ${workflowUrl}`);
+    console.log(`[Workflow Start] Invoking ${PLANNER_AGENT_APP_ID} via Dapr service invocation`);
     console.log(`[Workflow Start] Task: ${task.substring(0, 100)}...`);
     if (sessionId) {
       console.log(`[Workflow Start] Session ID: ${sessionId}`);
@@ -83,14 +87,13 @@ export async function POST(request: Request): Promise<Response> {
       console.log(`[Workflow Start] Target Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`);
     }
 
-    // Call planner-agent's workflow API
+    // Call planner-agent's workflow API via Dapr service invocation
     // The workflow handles clone internally for durability
-    const response = await fetch(workflowUrl, {
+    const response = await invokeService<{ workflowId: string; status: string; error?: string }>({
+      appId: PLANNER_AGENT_APP_ID,
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+      path: "/api/workflows",
+      body: {
         prompt: task,
         sessionId,
         options: {
@@ -98,51 +101,36 @@ export async function POST(request: Request): Promise<Response> {
           workingDirectory: options?.workingDirectory,
           targetRepository,
         },
-      }),
+      },
+      timeout: 60000, // Allow up to 60 seconds for workflow scheduling
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error(
-        `[Workflow Start] Planner-agent returned ${response.status}: ${errorText}`
-      );
+      const errorMsg = response.data?.error || `Workflow service error: ${response.status}`;
+      console.error(`[Workflow Start] Planner-agent returned ${response.status}: ${errorMsg}`);
       return NextResponse.json(
         {
           success: false,
-          error: `Workflow service error: ${response.status} - ${errorText}`,
+          error: errorMsg,
         } satisfies StartWorkflowResponse,
         { status: response.status }
       );
     }
 
-    const data = await response.json();
-
     console.log(
-      `[Workflow Start] Workflow started successfully: ${data.workflowId}`
+      `[Workflow Start] Workflow started successfully: ${response.data?.workflowId}`
     );
 
     return NextResponse.json(
       {
         success: true,
-        workflowId: data.workflowId,
-        status: data.status,
+        workflowId: response.data?.workflowId,
+        status: response.data?.status,
       } satisfies StartWorkflowResponse,
       { status: 201 }
     );
   } catch (error) {
     console.error("[Workflow Start] Error:", error);
-
-    // Check if it's a connection error
-    if (error instanceof TypeError && error.message.includes("fetch")) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Cannot connect to planner-agent service. Make sure planner-agent is running.",
-        } satisfies StartWorkflowResponse,
-        { status: 503 }
-      );
-    }
 
     return NextResponse.json(
       {

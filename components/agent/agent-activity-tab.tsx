@@ -33,6 +33,7 @@ import {
   ReasoningContent,
 } from "@/components/ai-elements/reasoning";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
+import type { BundledLanguage } from "shiki";
 import { Loader } from "@/components/ai-elements/loader";
 import { Button } from "@/components/ui/button";
 
@@ -44,14 +45,14 @@ interface AgentActivityTabProps {
 }
 
 // Activity item types
-type ActivityType = "reasoning" | "tool_call" | "tool_result" | "file_changed" | "progress" | "error";
+type ActivityType = "thinking" | "text" | "tool_call" | "tool_result" | "file_changed" | "progress" | "error";
 
 interface ActivityItem {
   id: string;
   type: ActivityType;
   timestamp: Date;
   toolName?: string;
-  toolInput?: unknown;
+  toolInput?: Record<string, unknown>;
   toolOutput?: string;
   content?: string;
   status?: "running" | "success" | "error";
@@ -97,33 +98,55 @@ function mapToolStatus(status?: string): "input-available" | "output-available" 
  */
 function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
   const items: ActivityItem[] = [];
-  let currentReasoning = "";
-  let lastReasoningTime: Date | null = null;
+  let currentThinking = "";
+  let lastThinkingTime: Date | null = null;
+  let currentText = "";
+  let lastTextTime: Date | null = null;
 
   // Map to correlate tool calls with results
   const pendingToolCalls = new Map<string, ActivityItem>();
 
   for (const event of events) {
     switch (event.type) {
-      case "llm_chunk":
-        // Accumulate LLM chunks into reasoning
+      case "thinking":
+        // Accumulate thinking blocks (Claude's internal reasoning)
         if (event.data.content || event.data.text) {
-          currentReasoning += event.data.content || event.data.text || "";
-          lastReasoningTime = new Date(event.timestamp);
+          currentThinking += event.data.content || event.data.text || "";
+          lastThinkingTime = new Date(event.timestamp);
+        }
+        break;
+
+      case "llm_chunk":
+        // Accumulate LLM text chunks (visible output)
+        if (event.data.content || event.data.text) {
+          currentText += event.data.content || event.data.text || "";
+          lastTextTime = new Date(event.timestamp);
         }
         break;
 
       case "tool_call": {
-        // Flush any accumulated reasoning before tool call
-        if (currentReasoning.trim().length > 20) {
+        // Flush any accumulated thinking before tool call
+        if (currentThinking.trim().length > 20) {
           items.push({
-            id: `reasoning-${event.id}`,
-            type: "reasoning",
-            timestamp: lastReasoningTime || new Date(event.timestamp),
-            content: currentReasoning,
+            id: `thinking-${event.id}`,
+            type: "thinking",
+            timestamp: lastThinkingTime || new Date(event.timestamp),
+            content: currentThinking,
             agentId: event.agentId,
           });
-          currentReasoning = "";
+          currentThinking = "";
+        }
+
+        // Flush any accumulated text before tool call
+        if (currentText.trim().length > 20) {
+          items.push({
+            id: `text-${event.id}`,
+            type: "text",
+            timestamp: lastTextTime || new Date(event.timestamp),
+            content: currentText,
+            agentId: event.agentId,
+          });
+          currentText = "";
         }
 
         // Add tool call
@@ -138,7 +161,7 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
             type: "tool_call",
             timestamp: new Date(event.timestamp),
             toolName: event.data.toolName,
-            toolInput: event.data.toolInput,
+            toolInput: event.data.toolInput as Record<string, unknown> | undefined,
             status: "running",
             callId,
             agentId: event.agentId,
@@ -260,13 +283,23 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
     }
   }
 
-  // Flush remaining reasoning
-  if (currentReasoning.trim().length > 20) {
+  // Flush remaining thinking
+  if (currentThinking.trim().length > 20) {
     items.push({
-      id: `reasoning-final`,
-      type: "reasoning",
-      timestamp: lastReasoningTime || new Date(),
-      content: currentReasoning,
+      id: `thinking-final`,
+      type: "thinking",
+      timestamp: lastThinkingTime || new Date(),
+      content: currentThinking,
+    });
+  }
+
+  // Flush remaining text
+  if (currentText.trim().length > 20) {
+    items.push({
+      id: `text-final`,
+      type: "text",
+      timestamp: lastTextTime || new Date(),
+      content: currentText,
     });
   }
 
@@ -408,8 +441,10 @@ interface ActivityCardProps {
 
 const ActivityCard = memo(function ActivityCard({ item }: ActivityCardProps) {
   switch (item.type) {
-    case "reasoning":
-      return <ReasoningCard content={item.content || ""} />;
+    case "thinking":
+      return <ThinkingCard content={item.content || ""} />;
+    case "text":
+      return <TextCard content={item.content || ""} />;
     case "tool_call":
     case "tool_result":
     case "file_changed":
@@ -424,9 +459,35 @@ const ActivityCard = memo(function ActivityCard({ item }: ActivityCardProps) {
 });
 
 /**
- * Reasoning card using AI Elements Reasoning component
+ * Thinking card - Claude's internal reasoning (extended thinking)
+ * Displayed collapsed by default with a distinctive appearance
  */
-const ReasoningCard = memo(function ReasoningCard({ content }: { content: string }) {
+const ThinkingCard = memo(function ThinkingCard({ content }: { content: string }) {
+  return (
+    <div className="flex gap-3">
+      {/* Agent Avatar with thinking indicator */}
+      <div className="flex-shrink-0">
+        <div className="size-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+          <BotIcon className="size-4 text-white" />
+        </div>
+      </div>
+
+      {/* Thinking content - collapsible */}
+      <div className="flex-1 min-w-0">
+        <Reasoning duration={undefined} defaultOpen={false}>
+          <ReasoningTrigger />
+          <ReasoningContent>{content}</ReasoningContent>
+        </Reasoning>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Text card - visible LLM output (not internal reasoning)
+ * Displayed expanded by default
+ */
+const TextCard = memo(function TextCard({ content }: { content: string }) {
   return (
     <div className="flex gap-3">
       {/* Agent Avatar */}
@@ -436,12 +497,11 @@ const ReasoningCard = memo(function ReasoningCard({ content }: { content: string
         </div>
       </div>
 
-      {/* Reasoning content */}
-      <div className="flex-1 min-w-0">
-        <Reasoning duration={undefined} defaultOpen={false}>
-          <ReasoningTrigger />
-          <ReasoningContent>{content}</ReasoningContent>
-        </Reasoning>
+      {/* Text content - always visible */}
+      <div className="flex-1 min-w-0 prose prose-sm dark:prose-invert max-w-none">
+        <div className="text-sm text-foreground whitespace-pre-wrap break-words">
+          {content}
+        </div>
       </div>
     </div>
   );
@@ -496,9 +556,9 @@ const ToolCard = memo(function ToolCard({ item }: { item: ActivityItem }) {
   );
 
   // Determine language for syntax highlighting
-  const getLanguage = (): string => {
+  const getLanguage = () => {
     if (normalizedName === "bash" || normalizedName === "shell") return "bash";
-    if (normalizedName === "grep") return "plaintext";
+    if (normalizedName === "grep") return "text";
 
     const inputObj = item.toolInput as Record<string, unknown> | undefined;
     const path = String(inputObj?.path || inputObj?.file_path || "");
@@ -512,7 +572,7 @@ const ToolCard = memo(function ToolCard({ item }: { item: ActivityItem }) {
     if (path.endsWith(".html")) return "html";
     if (path.endsWith(".yaml") || path.endsWith(".yml")) return "yaml";
 
-    return "plaintext";
+    return "text";
   };
 
   return (
@@ -538,7 +598,7 @@ const ToolCard = memo(function ToolCard({ item }: { item: ActivityItem }) {
                 </h4>
                 <CodeBlock
                   code={truncateOutput(item.toolOutput)}
-                  language={getLanguage()}
+                  language={getLanguage() as BundledLanguage}
                   className={cn(
                     "max-h-64 overflow-y-auto",
                     item.status === "error" && "border-destructive/50"

@@ -8,21 +8,25 @@
 
 import { useMemo } from "react";
 import useSWR from "swr";
-import type {
-  WorkflowListResponse,
-  WorkflowEntry,
-} from "@/lib/types/workflow";
+import type { WorkflowEntry } from "@/lib/types/workflow";
 import type {
   WorkflowUIStatus,
   WorkflowListItem,
   WorkflowDetail,
   WorkflowFilters,
 } from "@/lib/types/workflow-ui";
-import {
-  transformWorkflowListItem,
-  toWorkflowDetail,
-  applyWorkflowFilters,
-} from "@/lib/transforms/workflow-ui";
+import { toWorkflowDetail, applyWorkflowFilters } from "@/lib/transforms/workflow-ui";
+
+/**
+ * Response type from the workflows API
+ */
+interface WorkflowsAPIResponse {
+  workflows: WorkflowListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  error?: string;
+}
 
 // ============================================================================
 // Fetcher
@@ -68,7 +72,7 @@ export function useDaprWorkflows(
   options?: UseDaprWorkflowsOptions,
   refreshInterval = 5000
 ): UseDaprWorkflowsReturn {
-  const { data, error, isLoading, mutate } = useSWR<WorkflowListResponse>(
+  const { data, error, isLoading, mutate } = useSWR<WorkflowsAPIResponse>(
     "/api/workflows",
     fetcher,
     {
@@ -78,29 +82,23 @@ export function useDaprWorkflows(
     }
   );
 
-  // Transform and filter workflows
+  // Filter workflows (data is already in UI format from the API)
   const { workflows, total } = useMemo(() => {
     if (!data?.workflows) {
       return { workflows: [], total: 0 };
     }
 
-    // Transform to UI format
-    const transformedWorkflows = data.workflows.map(transformWorkflowListItem);
+    // Workflows are already in UI format and sorted by the API
+    let result = [...data.workflows];
 
-    // Sort by start time descending (most recent first)
-    transformedWorkflows.sort(
-      (a, b) =>
-        new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
-    );
-
-    // Apply filters
+    // Apply client-side filters
     const filters: WorkflowFilters = {
       search: options?.search,
       status: options?.status,
       appId: options?.appId,
     };
 
-    const filtered = applyWorkflowFilters(transformedWorkflows, filters);
+    const filtered = applyWorkflowFilters(result, filters);
 
     return {
       workflows: filtered,

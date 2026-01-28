@@ -75,6 +75,34 @@ export interface WorkflowNameStats {
 }
 
 // ============================================================================
+// Custom Status Types (for planner-agent workflows)
+// ============================================================================
+
+/**
+ * Phase of a planner-agent workflow
+ */
+export type WorkflowPhase =
+  | "clone"
+  | "exploration"
+  | "planning"
+  | "awaiting_approval"
+  | "executing"
+  | "completed"
+  | "failed";
+
+/**
+ * Custom status from planner-agent workflow
+ * Contains phase, progress, and human-readable message
+ */
+export interface WorkflowCustomStatus {
+  phase: WorkflowPhase;
+  progress: number; // 0-100
+  message: string;
+  plan_id?: string;
+  currentTask?: string; // Currently executing task title
+}
+
+// ============================================================================
 // Workflow List Types
 // ============================================================================
 
@@ -83,11 +111,17 @@ export interface WorkflowNameStats {
  */
 export interface WorkflowListItem {
   instanceId: string;
-  workflowType: string; // e.g., "planExecutionWorkflow"
-  appId: string; // e.g., "workflow-orchestrator"
+  workflowType: string; // e.g., "planExecutionWorkflow", "planningAndExecutionWorkflow"
+  appId: string; // e.g., "workflow-orchestrator", "planner-agent"
   status: WorkflowUIStatus;
   startTime: string;
   endTime: string | null;
+  /** Custom status from planner-agent (phase, progress, message) */
+  customStatus?: WorkflowCustomStatus;
+  /** Session title for planner-agent workflows */
+  sessionTitle?: string;
+  /** Session ID linking back to AgentSession */
+  sessionId?: string;
 }
 
 // ============================================================================
@@ -182,5 +216,52 @@ export function getEventTypeColor(eventType: DaprExecutionEventType): string {
       return "text-orange-600";
     default:
       return "text-gray-600";
+  }
+}
+
+/**
+ * Get display label for workflow phase
+ */
+export function getPhaseLabel(phase: WorkflowPhase): string {
+  switch (phase) {
+    case "clone":
+      return "Cloning";
+    case "exploration":
+      return "Exploring";
+    case "planning":
+      return "Planning";
+    case "awaiting_approval":
+      return "Awaiting Approval";
+    case "executing":
+      return "Executing";
+    case "completed":
+      return "Completed";
+    case "failed":
+      return "Failed";
+    default:
+      return phase;
+  }
+}
+
+/**
+ * Get color class for workflow phase
+ */
+export function getPhaseColor(phase: WorkflowPhase): string {
+  switch (phase) {
+    case "clone":
+    case "exploration":
+      return "text-blue-400";
+    case "planning":
+      return "text-purple-400";
+    case "awaiting_approval":
+      return "text-yellow-400";
+    case "executing":
+      return "text-amber-400";
+    case "completed":
+      return "text-green-400";
+    case "failed":
+      return "text-red-400";
+    default:
+      return "text-gray-400";
   }
 }

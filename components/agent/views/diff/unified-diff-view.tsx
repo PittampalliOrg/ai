@@ -11,7 +11,7 @@ interface UnifiedDiffViewProps {
 export function UnifiedDiffView({ hunks, isLoading }: UnifiedDiffViewProps) {
   if (isLoading) {
     return (
-      <div className="bg-zinc-950/90 p-6 text-center text-zinc-500 text-sm">
+      <div className="bg-[#0d1117] p-6 text-center text-zinc-500 text-sm">
         Loading diff...
       </div>
     );
@@ -19,7 +19,7 @@ export function UnifiedDiffView({ hunks, isLoading }: UnifiedDiffViewProps) {
 
   if (hunks.length === 0) {
     return (
-      <div className="bg-zinc-950/90 p-6 text-center text-zinc-500 text-sm">
+      <div className="bg-[#0d1117] p-6 text-center text-zinc-500 text-sm">
         No changes
       </div>
     );
@@ -29,8 +29,13 @@ export function UnifiedDiffView({ hunks, isLoading }: UnifiedDiffViewProps) {
   const allLines: DiffLine[] = hunks.flatMap((hunk) => hunk.lines);
 
   return (
-    <div className="bg-zinc-950/90 overflow-x-auto">
-      <table className="w-full text-[13px] leading-relaxed font-mono border-collapse">
+    <div className="bg-[#0d1117] overflow-x-auto">
+      <table className="w-full text-[13px] leading-[1.45] font-mono border-collapse antialiased [font-feature-settings:'liga'_0,'calt'_1]">
+        <colgroup>
+          <col className="w-12" />
+          <col className="w-12" />
+          <col />
+        </colgroup>
         <tbody>
           {allLines.map((line, index) => (
             <DiffLineRow

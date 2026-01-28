@@ -24,22 +24,66 @@ interface ExecutionHistoryTableProps {
 }
 
 function EventDetailRow({ event }: { event: DaprExecutionEvent }) {
-  const [copied, setCopied] = useState(false);
+  const [copiedInput, setCopiedInput] = useState(false);
+  const [copiedOutput, setCopiedOutput] = useState(false);
 
-  const handleCopy = async () => {
+  const handleCopyInput = async () => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(event.output, null, 2));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(JSON.stringify(event.input, null, 2));
+      setCopiedInput(true);
+      setTimeout(() => setCopiedInput(false), 2000);
     } catch (err) {
       console.error("Failed to copy:", err);
     }
   };
 
+  const handleCopyOutput = async () => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(event.output, null, 2));
+      setCopiedOutput(true);
+      setTimeout(() => setCopiedOutput(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  const hasInput = event.input !== undefined && event.input !== null;
   const hasOutput = event.output !== undefined && event.output !== null;
 
   return (
     <div className="p-4 bg-[#1e2433] rounded-lg space-y-3">
+      {/* Input section */}
+      {hasInput && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-400">
+              Input
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto py-0 px-0 text-teal-400 hover:text-teal-300 hover:bg-transparent"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCopyInput();
+              }}
+            >
+              {copiedInput ? (
+                <span className="flex items-center gap-1">
+                  <Check className="h-3.5 w-3.5" />
+                  Copied
+                </span>
+              ) : (
+                "Copy"
+              )}
+            </Button>
+          </div>
+          <pre className="text-xs font-mono bg-[#151922] p-3 rounded border border-gray-700 overflow-auto max-h-40 text-gray-300">
+            {JSON.stringify(event.input, null, 2)}
+          </pre>
+        </div>
+      )}
+
       {/* Output section */}
       {hasOutput && (
         <div className="space-y-2">
@@ -53,10 +97,10 @@ function EventDetailRow({ event }: { event: DaprExecutionEvent }) {
               className="h-auto py-0 px-0 text-teal-400 hover:text-teal-300 hover:bg-transparent"
               onClick={(e) => {
                 e.stopPropagation();
-                handleCopy();
+                handleCopyOutput();
               }}
             >
-              {copied ? (
+              {copiedOutput ? (
                 <span className="flex items-center gap-1">
                   <Check className="h-3.5 w-3.5" />
                   Copied
@@ -120,6 +164,7 @@ function EventRow({ event }: { event: DaprExecutionEvent }) {
   const [expanded, setExpanded] = useState(false);
 
   // Check if there's any expandable content
+  const hasInput = event.input !== undefined && event.input !== null;
   const hasOutput = event.output !== undefined && event.output !== null;
   const hasMetadata = event.metadata && (
     event.metadata.elapsed ||
@@ -127,7 +172,7 @@ function EventRow({ event }: { event: DaprExecutionEvent }) {
     event.metadata.status ||
     event.metadata.taskId
   );
-  const hasExpandableContent = hasOutput || hasMetadata;
+  const hasExpandableContent = hasInput || hasOutput || hasMetadata;
 
   return (
     <>

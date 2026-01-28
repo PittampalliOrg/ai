@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, isNull, inArray, lt, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -192,6 +192,69 @@ export async function getAgentSessionByWorkflowId({
 }
 
 /**
+ * Update workflow status cache by workflowId
+ * Used by Dapr pub/sub webhook to sync status from workflow events
+ */
+export async function updateAgentSessionWorkflowStatusByWorkflowId({
+  workflowId,
+  workflowStatus,
+  workflowPhase,
+  workflowProgress,
+  workflowCurrentTask,
+  workflowMessage,
+}: {
+  workflowId: string;
+  workflowStatus?: "none" | "pending" | "running" | "suspended" | "completed" | "failed" | "terminated";
+  workflowPhase?: string | null;
+  workflowProgress?: number | null;
+  workflowCurrentTask?: string | null;
+  workflowMessage?: string | null;
+}): Promise<void> {
+  const updateData: Record<string, unknown> = {
+    workflowUpdatedAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  if (workflowStatus !== undefined) updateData.workflowStatus = workflowStatus;
+  if (workflowPhase !== undefined) updateData.workflowPhase = workflowPhase;
+  if (workflowProgress !== undefined) updateData.workflowProgress = workflowProgress;
+  if (workflowCurrentTask !== undefined) updateData.workflowCurrentTask = workflowCurrentTask;
+  if (workflowMessage !== undefined) updateData.workflowMessage = workflowMessage;
+
+  await db
+    .update(agentSession)
+    .set(updateData)
+    .where(eq(agentSession.workflowId, workflowId));
+}
+
+/**
+ * Get stale workflows (stuck in running/pending for more than threshold minutes)
+ * Used by background reconciliation job
+ */
+export async function getStaleWorkflows({
+  staleThresholdMinutes = 10,
+}: {
+  staleThresholdMinutes?: number;
+} = {}): Promise<AgentSession[]> {
+  const threshold = new Date(Date.now() - staleThresholdMinutes * 60 * 1000);
+
+  return db
+    .select()
+    .from(agentSession)
+    .where(
+      and(
+        isNotNull(agentSession.workflowId),
+        inArray(agentSession.workflowStatus, ["running", "pending"]),
+        // Check if workflowUpdatedAt is older than threshold, or if it's null (never updated)
+        or(
+          isNull(agentSession.workflowUpdatedAt),
+          lt(agentSession.workflowUpdatedAt, threshold)
+        )
+      )
+    );
+}
+
+/**
  * Get sessions with active workflows (for monitoring)
  */
 export async function getSessionsWithActiveWorkflows(): Promise<AgentSession[]> {
@@ -203,6 +266,88 @@ export async function getSessionsWithActiveWorkflows(): Promise<AgentSession[]> 
         eq(agentSession.workflowStatus, "running"),
       )
     );
+}
+
+/**
+ * Get agent sessions that have associated workflows (for workflow dashboard).
+ * Returns sessions with non-null workflowId, optionally filtered by status.
+ * Used by /api/workflows to include planner-agent workflows in the listing.
+ */
+export async function getAgentSessionsWithWorkflows({
+  limit = 50,
+  offset = 0,
+  status,
+}: {
+  limit?: number;
+  offset?: number;
+  status?: string | string[];
+}): Promise<AgentSession[]> {
+  // Build conditions - workflowId must be non-null
+  const conditions = [isNotNull(agentSession.workflowId)];
+
+  // Add status filter if provided
+  if (status) {
+    const statusArray = Array.isArray(status) ? status : [status];
+    // Map UI status values to DB status values
+    const mappedStatuses = statusArray.map((s) => {
+      const mapping: Record<string, string> = {
+        RUNNING: "running",
+        COMPLETED: "completed",
+        FAILED: "failed",
+        SUSPENDED: "suspended",
+        TERMINATED: "terminated",
+        PENDING: "pending",
+      };
+      return mapping[s.toUpperCase()] || s.toLowerCase();
+    });
+    conditions.push(
+      inArray(agentSession.workflowStatus, mappedStatuses as ("none" | "pending" | "running" | "suspended" | "completed" | "failed" | "terminated")[])
+    );
+  }
+
+  return db
+    .select()
+    .from(agentSession)
+    .where(and(...conditions))
+    .orderBy(desc(agentSession.createdAt))
+    .limit(limit)
+    .offset(offset);
+}
+
+/**
+ * Count agent sessions with workflows (for pagination)
+ */
+export async function countAgentSessionsWithWorkflows({
+  status,
+}: {
+  status?: string | string[];
+} = {}): Promise<number> {
+  const conditions = [isNotNull(agentSession.workflowId)];
+
+  if (status) {
+    const statusArray = Array.isArray(status) ? status : [status];
+    const mappedStatuses = statusArray.map((s) => {
+      const mapping: Record<string, string> = {
+        RUNNING: "running",
+        COMPLETED: "completed",
+        FAILED: "failed",
+        SUSPENDED: "suspended",
+        TERMINATED: "terminated",
+        PENDING: "pending",
+      };
+      return mapping[s.toUpperCase()] || s.toLowerCase();
+    });
+    conditions.push(
+      inArray(agentSession.workflowStatus, mappedStatuses as ("none" | "pending" | "running" | "suspended" | "completed" | "failed" | "terminated")[])
+    );
+  }
+
+  const result = await db
+    .select()
+    .from(agentSession)
+    .where(and(...conditions));
+
+  return result.length;
 }
 
 export async function updateAgentSessionTitle({

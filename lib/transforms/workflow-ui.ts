@@ -17,7 +17,10 @@ import type {
   WorkflowDetail,
   DaprExecutionEvent,
   DaprExecutionEventType,
+  WorkflowCustomStatus,
+  WorkflowPhase,
 } from "@/lib/types/workflow-ui";
+import type { AgentSession } from "@/lib/db/schema";
 
 // ============================================================================
 // Timestamp Parsing
@@ -346,7 +349,13 @@ const DEFAULT_WORKFLOW_TYPE = "planExecutionWorkflow";
  * Transform WorkflowEntry to WorkflowListItem
  */
 export function toWorkflowListItem(
-  workflow: WorkflowEntry & { workflowType?: string; source?: string }
+  workflow: WorkflowEntry & {
+    workflowType?: string;
+    source?: string;
+    customStatus?: WorkflowCustomStatus;
+    sessionTitle?: string;
+    sessionId?: string;
+  }
 ): WorkflowListItem {
   // Parse timestamps (may be protobuf or ISO format)
   const parsedSubmittedAt = parseTimestamp(workflow.request?.submittedAt);
@@ -366,13 +375,20 @@ export function toWorkflowListItem(
     endTime = parsedUpdatedAt || null;
   }
 
-  // Use pattern-specific workflowType and appId if available
-  const workflowType = workflow.source === "patterns" && workflow.workflowType
-    ? `${workflow.workflowType}Workflow`
-    : DEFAULT_WORKFLOW_TYPE;
-  const appId = workflow.source === "patterns"
-    ? "workflow-patterns"
-    : DEFAULT_APP_ID;
+  // Determine workflowType and appId based on source
+  let workflowType: string;
+  let appId: string;
+
+  if (workflow.source === "planner-agent") {
+    workflowType = workflow.workflowType || "planningAndExecutionWorkflow";
+    appId = "planner-agent";
+  } else if (workflow.source === "patterns" && workflow.workflowType) {
+    workflowType = `${workflow.workflowType}Workflow`;
+    appId = "workflow-patterns";
+  } else {
+    workflowType = workflow.workflowType || DEFAULT_WORKFLOW_TYPE;
+    appId = DEFAULT_APP_ID;
+  }
 
   return {
     instanceId: workflow.id,
@@ -381,6 +397,9 @@ export function toWorkflowListItem(
     status: mapWorkflowStatus(workflow.status),
     startTime,
     endTime,
+    customStatus: workflow.customStatus,
+    sessionTitle: workflow.sessionTitle,
+    sessionId: workflow.sessionId,
   };
 }
 
@@ -434,7 +453,13 @@ export function transformWorkflowListItem(
  * Transform WorkflowEntry to WorkflowDetail
  */
 export function toWorkflowDetail(
-  workflow: WorkflowEntry & { workflowType?: string; source?: string }
+  workflow: WorkflowEntry & {
+    workflowType?: string;
+    source?: string;
+    customStatus?: WorkflowCustomStatus;
+    sessionTitle?: string;
+    sessionId?: string;
+  }
 ): WorkflowDetail {
   const listItem = toWorkflowListItem(workflow);
 
@@ -501,6 +526,206 @@ export function toWorkflowDetail(
     output,
     executionHistory,
   };
+}
+
+// ============================================================================
+// Planner-Agent Workflow Transformations
+// ============================================================================
+
+/**
+ * Planner-agent workflow status response
+ */
+export interface PlannerAgentStatusResponse {
+  runtime_status: string;
+  custom_status?: {
+    phase?: string;
+    progress?: number;
+    message?: string;
+    plan_id?: string;
+  };
+  created_at?: string;
+  updated_at?: string;
+}
+
+/**
+ * Map planner-agent runtime_status to UI status
+ */
+export function mapPlannerAgentStatus(runtimeStatus: string): WorkflowUIStatus {
+  const normalizedStatus = runtimeStatus?.toUpperCase?.() || runtimeStatus;
+
+  switch (normalizedStatus) {
+    case "RUNNING":
+    case "PENDING":
+      return "RUNNING";
+    case "COMPLETED":
+      return "COMPLETED";
+    case "FAILED":
+      return "FAILED";
+    case "SUSPENDED":
+      return "SUSPENDED";
+    case "TERMINATED":
+      return "CANCELLED";
+    default:
+      return "RUNNING";
+  }
+}
+
+/**
+ * Map AgentSession workflowStatus to UI status
+ */
+export function mapAgentSessionWorkflowStatus(
+  status: string | null | undefined
+): WorkflowUIStatus {
+  if (!status || status === "none") {
+    return "RUNNING";
+  }
+
+  switch (status.toLowerCase()) {
+    case "running":
+    case "pending":
+      return "RUNNING";
+    case "completed":
+      return "COMPLETED";
+    case "failed":
+      return "FAILED";
+    case "suspended":
+      return "SUSPENDED";
+    case "terminated":
+      return "CANCELLED";
+    default:
+      return "RUNNING";
+  }
+}
+
+/**
+ * Transform AgentSession to WorkflowListItem
+ * Used when we don't have real-time status from planner-agent
+ */
+export function transformAgentSessionToWorkflowListItem(
+  session: AgentSession
+): WorkflowListItem {
+  const startTime = session.createdAt?.toISOString?.()
+    ?? (typeof session.createdAt === "string" ? session.createdAt : new Date().toISOString());
+
+  const status = mapAgentSessionWorkflowStatus(session.workflowStatus);
+
+  // Determine end time based on status
+  let endTime: string | null = null;
+  if (status === "COMPLETED" || status === "FAILED" || status === "CANCELLED") {
+    endTime = session.updatedAt?.toISOString?.()
+      ?? (typeof session.updatedAt === "string" ? session.updatedAt : null);
+  }
+
+  return {
+    instanceId: session.workflowId || session.id,
+    workflowType: "planningAndExecutionWorkflow",
+    appId: "planner-agent",
+    status,
+    startTime,
+    endTime,
+    sessionTitle: session.title,
+    sessionId: session.id,
+  };
+}
+
+/**
+ * Transform AgentSession to WorkflowListItem using cached status fields
+ * This is the primary transform function - reads status from database cache
+ * (populated via Dapr pub/sub events in the webhook handler)
+ */
+export function transformAgentSessionToWorkflowListItemWithCache(
+  session: AgentSession & {
+    workflowPhase?: string | null;
+    workflowProgress?: number | null;
+    workflowCurrentTask?: string | null;
+    workflowMessage?: string | null;
+    workflowUpdatedAt?: Date | string | null;
+  }
+): WorkflowListItem {
+  const startTime = session.createdAt?.toISOString?.()
+    ?? (typeof session.createdAt === "string" ? session.createdAt : new Date().toISOString());
+
+  const status = mapAgentSessionWorkflowStatus(session.workflowStatus);
+
+  // Determine end time based on status
+  let endTime: string | null = null;
+  if (status === "COMPLETED" || status === "FAILED" || status === "CANCELLED") {
+    // Use workflowUpdatedAt if available (more accurate), otherwise fall back to updatedAt
+    const workflowEndTime = session.workflowUpdatedAt;
+    if (workflowEndTime) {
+      endTime = typeof workflowEndTime === "string"
+        ? workflowEndTime
+        : workflowEndTime.toISOString?.() ?? null;
+    } else {
+      endTime = session.updatedAt?.toISOString?.()
+        ?? (typeof session.updatedAt === "string" ? session.updatedAt : null);
+    }
+  }
+
+  // Build custom status from cached fields
+  let customStatus: WorkflowCustomStatus | undefined;
+  if (session.workflowPhase || session.workflowProgress != null || session.workflowCurrentTask) {
+    customStatus = {
+      phase: (session.workflowPhase || "executing") as WorkflowPhase,
+      progress: session.workflowProgress ?? 0,
+      message: session.workflowMessage || "",
+      currentTask: session.workflowCurrentTask ?? undefined,
+    };
+  }
+
+  return {
+    instanceId: session.workflowId || session.id,
+    workflowType: "planningAndExecutionWorkflow",
+    appId: "planner-agent",
+    status,
+    startTime,
+    endTime,
+    customStatus,
+    sessionTitle: session.title,
+    sessionId: session.id,
+  };
+}
+
+/**
+ * Transform AgentSession with planner-agent status response to WorkflowListItem
+ * Enriches the basic AgentSession data with real-time status from planner-agent
+ */
+export function transformAgentSessionWithStatus(
+  session: AgentSession,
+  statusResponse: PlannerAgentStatusResponse | null
+): WorkflowListItem {
+  const baseItem = transformAgentSessionToWorkflowListItem(session);
+
+  // If we have a status response, enrich with real-time data
+  if (statusResponse) {
+    baseItem.status = mapPlannerAgentStatus(statusResponse.runtime_status);
+
+    // Add custom status if available
+    if (statusResponse.custom_status) {
+      const cs = statusResponse.custom_status;
+      baseItem.customStatus = {
+        phase: (cs.phase || "executing") as WorkflowPhase,
+        progress: cs.progress ?? 0,
+        message: cs.message || "",
+        plan_id: cs.plan_id,
+      };
+    }
+
+    // Update end time based on actual runtime status
+    if (
+      statusResponse.runtime_status === "COMPLETED" ||
+      statusResponse.runtime_status === "FAILED" ||
+      statusResponse.runtime_status === "TERMINATED"
+    ) {
+      baseItem.endTime = statusResponse.updated_at
+        || session.updatedAt?.toISOString?.()
+        || (typeof session.updatedAt === "string" ? session.updatedAt : null);
+    } else {
+      baseItem.endTime = null;
+    }
+  }
+
+  return baseItem;
 }
 
 // ============================================================================

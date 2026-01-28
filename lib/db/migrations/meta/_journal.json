@@ -64,6 +64,27 @@
       "when": 1768479010084,
       "tag": "0008_flat_forgotten_one",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1737979920000,
+      "tag": "0009_agent_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1737979980000,
+      "tag": "0010_performance_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1737980040000,
+      "tag": "0011_workflow_status_cache",
+      "breakpoints": true
     }
   ]
 }

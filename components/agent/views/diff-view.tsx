@@ -45,7 +45,7 @@ export const DiffView = memo(function DiffView({
   }
 
   return (
-    <div className="p-5 space-y-4">
+    <div className="h-full overflow-y-auto p-5 space-y-4">
       {/* Summary header - Codex style with enhanced styling */}
       <div className="flex items-center justify-between px-2 pb-3 border-b border-zinc-700/40">
         <span className="text-sm font-medium text-zinc-300">

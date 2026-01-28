@@ -2,7 +2,13 @@
  * Workflow Detail API
  *
  * GET /api/workflows/[instanceId]
- * Fetches workflow details from AgentSession table and planner-agent service
+ * Fetches workflow details from AgentSession table and planner-agent service using Dapr service invocation
+ *
+ * Benefits of Dapr service invocation:
+ * - Automatic mTLS encryption between services
+ * - Built-in retries and circuit breakers
+ * - Distributed tracing for observability
+ * - Service discovery via app-id (no hardcoded URLs)
  */
 
 import { NextResponse, type NextRequest } from "next/server";
@@ -10,33 +16,32 @@ import type { WorkflowEntry, ExecutionLog } from "@/lib/types/workflow";
 import { getAgentSessionByWorkflowId, getAgentSession } from "@/lib/db/agent-queries";
 import type { PlannerAgentStatusResponse } from "@/lib/transforms/workflow-ui";
 import { getWorkflowEvents } from "@/lib/workflow-event-store";
+import { invokeService } from "@/lib/dapr/client";
 
-// Planner-agent service configuration
-const PLANNER_AGENT_URL =
-  process.env.PLANNER_AGENT_URL || "http://planner-agent.dapr-agents.svc.cluster.local:80";
+// Planner agent Dapr app ID
+// Use namespace-qualified app ID for cross-namespace Dapr invocation
+const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
 }
 
 /**
- * Fetch workflow status from planner-agent service
+ * Fetch workflow status from planner-agent service via Dapr service invocation
  */
 async function fetchPlannerAgentStatus(
   workflowId: string
 ): Promise<PlannerAgentStatusResponse | null> {
   try {
-    const response = await fetch(
-      `${PLANNER_AGENT_URL}/api/workflow/${workflowId}/status`,
-      {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        next: { revalidate: 0 },
-      }
-    );
+    const response = await invokeService<PlannerAgentStatusResponse>({
+      appId: PLANNER_AGENT_APP_ID,
+      method: "GET",
+      path: `/api/workflow/${workflowId}/status`,
+      timeout: 10000,
+    });
 
-    if (response.ok) {
-      return await response.json();
+    if (response.ok && response.data) {
+      return response.data;
     }
     return null;
   } catch (error) {

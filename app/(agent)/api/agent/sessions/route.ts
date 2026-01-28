@@ -9,12 +9,11 @@ import {
 } from "@/lib/db/agent-queries";
 import { verifyUserExists } from "@/lib/db/queries";
 import { getRepoAccessToken } from "@/lib/github/app-auth";
+import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent service configuration (the SINGLE workflow orchestrator)
-// All workflows run in planner-agent for single source of truth
-const PLANNER_AGENT_URL =
-  process.env.WORKFLOW_SERVICE_URL ||
-  "http://planner-agent.planner-agent.svc.cluster.local:8080";
+// Planner agent Dapr app ID (all workflows run in planner-agent for single source of truth)
+// Use namespace-qualified app ID for cross-namespace Dapr invocation
+const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
 
 /**
  * GET /api/agent/sessions
@@ -117,33 +116,31 @@ export async function POST(request: NextRequest) {
           // Continue without token - will fail for private repos
         }
 
-        // Call planner-agent's workflow API directly
+        // Call planner-agent's workflow API via Dapr service invocation
         // The workflow handles clone → explore → plan → approve → execute
-        const workflowResponse = await fetch(
-          `${PLANNER_AGENT_URL}/api/workflows`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              prompt: task,
-              sessionId: agentSession.id,
-              options: {
-                targetRepository: {
-                  owner: targetRepository.owner,
-                  repo: targetRepository.repo,
-                  branch: targetRepository.branch || "main",
-                  token: repoToken, // Pass token for authenticated clone
-                },
+        const workflowResponse = await invokeService<{ workflowId: string; status: string; error?: string }>({
+          appId: PLANNER_AGENT_APP_ID,
+          method: "POST",
+          path: "/api/workflows",
+          body: {
+            prompt: task,
+            sessionId: agentSession.id,
+            options: {
+              targetRepository: {
+                owner: targetRepository.owner,
+                repo: targetRepository.repo,
+                branch: targetRepository.branch || "main",
+                token: repoToken, // Pass token for authenticated clone
               },
-            }),
-          }
-        );
+            },
+          },
+          timeout: 60000,
+        });
 
-        if (workflowResponse.ok) {
-          const workflowData = await workflowResponse.json();
-          const workflowId = workflowData.workflowId;
+        if (workflowResponse.ok && workflowResponse.data) {
+          const workflowId = workflowResponse.data.workflowId;
           console.log(
-            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-agent`
+            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-agent (Dapr)`
           );
 
           // Link workflow to session
@@ -162,9 +159,9 @@ export async function POST(request: NextRequest) {
             },
           });
         } else {
-          const errorText = await workflowResponse.text();
+          const errorMsg = workflowResponse.data?.error || `HTTP ${workflowResponse.status}`;
           console.error(
-            `[POST /api/agent/sessions] Failed to start workflow: ${workflowResponse.status} - ${errorText}`
+            `[POST /api/agent/sessions] Failed to start workflow: ${errorMsg}`
           );
         }
         // Session created but workflow failed - return session anyway

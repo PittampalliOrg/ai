@@ -19,6 +19,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 export type WorkflowStreamEventType =
   | "initial"
   | "llm_chunk"
+  | "thinking"  // Claude's extended thinking (internal reasoning)
   | "tool_call"
   | "tool_result"
   | "file_changed"

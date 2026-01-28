@@ -64,7 +64,7 @@ export function SplitDiffView({ hunks, isLoading }: SplitDiffViewProps) {
 
   if (isLoading) {
     return (
-      <div className="bg-zinc-950/90 p-6 text-center text-zinc-500 text-sm">
+      <div className="bg-[#0d1117] p-6 text-center text-zinc-500 text-sm">
         Loading diff...
       </div>
     );
@@ -72,19 +72,19 @@ export function SplitDiffView({ hunks, isLoading }: SplitDiffViewProps) {
 
   if (hunks.length === 0) {
     return (
-      <div className="bg-zinc-950/90 p-6 text-center text-zinc-500 text-sm">
+      <div className="bg-[#0d1117] p-6 text-center text-zinc-500 text-sm">
         No changes
       </div>
     );
   }
 
   return (
-    <div className="bg-zinc-950/90 overflow-x-auto">
-      <table className="w-full text-[13px] leading-relaxed font-mono border-collapse table-fixed">
+    <div className="bg-[#0d1117] overflow-x-auto">
+      <table className="w-full text-[13px] leading-[1.45] font-mono border-collapse table-fixed antialiased [font-feature-settings:'liga'_0,'calt'_1]">
         <colgroup>
-          <col className="w-14" />
+          <col className="w-12" />
           <col className="w-1/2" />
-          <col className="w-14" />
+          <col className="w-12" />
           <col className="w-1/2" />
         </colgroup>
         <tbody>

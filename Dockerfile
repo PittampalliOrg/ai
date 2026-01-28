@@ -55,6 +55,19 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# Install system dependencies required by Claude Code CLI
+# - git: Required for repository operations (clone, diff, status, etc.)
+# - bash: Claude Code uses bash for shell commands (Alpine default is ash)
+# - curl: For web fetches and API calls
+# - jq: For JSON processing in shell commands
+# See: https://github.com/anthropics/claude-code/blob/main/.devcontainer/Dockerfile
+RUN apk add --no-cache git bash curl jq
+
+# Install Claude Code CLI globally for AI Agent SDK support
+# Required by ai-sdk-provider-claude-code for Claude Code model provider
+# See: https://platform.claude.com/docs/en/agent-sdk/hosting
+RUN npm install -g @anthropic-ai/claude-code
+
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs

@@ -23,7 +23,13 @@ export async function proxy(request: NextRequest) {
   }
 
   // Allow Dapr endpoints through without authentication for service mesh communication
-  if (pathname.startsWith("/api/dapr") || pathname.startsWith("/api/webhooks/dapr")) {
+  // This includes /dapr/* (subscription discovery), /api/dapr/*, and /api/webhooks/dapr/*
+  if (pathname.startsWith("/dapr") || pathname.startsWith("/api/dapr") || pathname.startsWith("/api/webhooks/dapr")) {
+    return NextResponse.next();
+  }
+
+  // Allow cron endpoints through without authentication for scheduled jobs
+  if (pathname.startsWith("/api/cron")) {
     return NextResponse.next();
   }
 

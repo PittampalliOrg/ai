@@ -17,6 +17,7 @@ import {
   getWorkflowEvents,
   clearWorkflowEvents,
 } from "@/lib/workflow-event-store";
+import { updateAgentSessionWorkflowStatusByWorkflowId } from "@/lib/db/agent-queries";
 
 // Re-export for other routes to use
 export { getWorkflowEvents, clearWorkflowEvents };
@@ -30,6 +31,7 @@ interface WorkflowStreamEvent {
   type:
     | "initial"
     | "llm_chunk"
+    | "thinking"  // Claude's extended thinking (internal reasoning)
     | "tool_call"
     | "tool_result"
     | "task_progress"
@@ -133,6 +135,84 @@ export async function POST(request: NextRequest) {
     // Verify storage
     const storedEvents = await getWorkflowEvents(event.workflowId);
     console.log(`[Webhook] Stored event. Total events for ${event.workflowId}: ${storedEvents.length}`);
+
+    // Update database for status-relevant events
+    // This syncs workflow status to AgentSession for the workflows list
+    try {
+      if (event.type === "execution_completed") {
+        console.log(`[Webhook] Updating AgentSession for completed workflow: ${event.workflowId}`);
+        await updateAgentSessionWorkflowStatusByWorkflowId({
+          workflowId: event.workflowId,
+          workflowStatus: "completed",
+          workflowPhase: "completed",
+          workflowProgress: 100,
+          workflowCurrentTask: null,
+          workflowMessage: "Workflow completed successfully",
+        });
+      } else if (event.type === "execution_failed") {
+        console.log(`[Webhook] Updating AgentSession for failed workflow: ${event.workflowId}`);
+        await updateAgentSessionWorkflowStatusByWorkflowId({
+          workflowId: event.workflowId,
+          workflowStatus: "failed",
+          workflowPhase: "failed",
+          workflowCurrentTask: null,
+          workflowMessage: event.data.error || "Workflow failed",
+        });
+      } else if (event.type === "execution_started") {
+        console.log(`[Webhook] Updating AgentSession for started workflow: ${event.workflowId}`);
+        await updateAgentSessionWorkflowStatusByWorkflowId({
+          workflowId: event.workflowId,
+          workflowStatus: "running",
+          workflowPhase: "executing",
+          workflowProgress: 0,
+          workflowMessage: "Workflow started",
+        });
+      } else if (event.type === "task_progress") {
+        // Extract progress info from event
+        const metadata = event.data.metadata as Record<string, unknown> | undefined;
+        const taskTitle = metadata?.taskTitle as string | undefined;
+        const phase = event.data.status || "executing";
+        const progress = event.data.progress ?? 0;
+
+        console.log(`[Webhook] Updating AgentSession progress for ${event.workflowId}: ${phase} (${progress}%)`);
+        await updateAgentSessionWorkflowStatusByWorkflowId({
+          workflowId: event.workflowId,
+          workflowStatus: "running",
+          workflowPhase: phase,
+          workflowProgress: progress,
+          workflowCurrentTask: taskTitle ?? null,
+          workflowMessage: event.data.status || `Progress: ${progress}%`,
+        });
+      } else if (event.type === "task_started") {
+        // Update current task
+        const metadata = event.data.metadata as Record<string, unknown> | undefined;
+        const taskTitle = metadata?.taskTitle as string | undefined;
+
+        if (taskTitle) {
+          console.log(`[Webhook] Task started for ${event.workflowId}: ${taskTitle}`);
+          await updateAgentSessionWorkflowStatusByWorkflowId({
+            workflowId: event.workflowId,
+            workflowStatus: "running",
+            workflowCurrentTask: taskTitle,
+            workflowMessage: `Executing: ${taskTitle}`,
+          });
+        }
+      } else if (event.type === "task_completed") {
+        // Task completed, clear current task (next task_started will set new one)
+        const metadata = event.data.metadata as Record<string, unknown> | undefined;
+        const taskTitle = metadata?.taskTitle as string | undefined;
+
+        console.log(`[Webhook] Task completed for ${event.workflowId}: ${taskTitle || event.taskId}`);
+        await updateAgentSessionWorkflowStatusByWorkflowId({
+          workflowId: event.workflowId,
+          workflowStatus: "running",
+          workflowMessage: `Completed: ${taskTitle || event.taskId}`,
+        });
+      }
+    } catch (dbError) {
+      // Log but don't fail the webhook - event is already stored in Redis
+      console.error(`[Webhook] Error updating AgentSession for ${event.workflowId}:`, dbError);
+    }
 
     // Return success (Dapr expects 200 to acknowledge)
     return NextResponse.json({ success: true });

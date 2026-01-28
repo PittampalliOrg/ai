@@ -232,6 +232,7 @@ function ParsedEventView({ events }: ParsedEventViewProps) {
     const groups: Record<WorkflowStreamEventType, WorkflowStreamEvent[]> = {
       initial: [],
       llm_chunk: [],
+      thinking: [],
       tool_call: [],
       tool_result: [],
       file_changed: [],

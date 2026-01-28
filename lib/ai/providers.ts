@@ -29,9 +29,13 @@ const google = createGoogleGenerativeAI({
 });
 
 // Claude Code provider - uses Claude Code CLI with Pro/Max subscription
-// No API key needed - authenticates via `claude login` (OAuth)
+// Authentication: Uses ANTHROPIC_API_KEY env var in production containers
+// See: https://platform.claude.com/docs/en/agent-sdk/hosting
 const claudeCode = createClaudeCode({
   defaultSettings: {
+    // Path to Claude Code CLI - must be absolute path because SDK uses fs.existsSync()
+    // Default: /usr/local/bin/claude (global npm install location in Alpine/Docker)
+    pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_PATH || "/usr/local/bin/claude",
     // Accept edits automatically (bypassPermissions not allowed as root)
     permissionMode: "acceptEdits",
     // Working directory for CLI operations

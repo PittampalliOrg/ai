@@ -1,7 +1,5 @@
 "use client";
 
-import { ChevronDownIcon, PaperclipIcon } from "lucide-react";
-import type { ComponentProps } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -10,26 +8,28 @@ import {
 } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { ChevronDownIcon, PaperclipIcon } from "lucide-react";
+import type { ComponentProps } from "react";
 
-export type QueueMessagePart = {
+export interface QueueMessagePart {
   type: string;
   text?: string;
   url?: string;
   filename?: string;
   mediaType?: string;
-};
+}
 
-export type QueueMessage = {
+export interface QueueMessage {
   id: string;
   parts: QueueMessagePart[];
-};
+}
 
-export type QueueTodo = {
+export interface QueueTodo {
   id: string;
   title: string;
   description?: string;
   status?: "pending" | "completed";
-};
+}
 
 export type QueueItemProps = ComponentProps<"li">;
 
@@ -75,7 +75,7 @@ export const QueueItemContent = ({
 }: QueueItemContentProps) => (
   <span
     className={cn(
-      "wrap-break-word line-clamp-1 grow",
+      "line-clamp-1 grow break-words",
       completed
         ? "text-muted-foreground/50 line-through"
         : "text-muted-foreground",
@@ -151,7 +151,6 @@ export const QueueItemImage = ({
   className,
   ...props
 }: QueueItemImageProps) => (
-  // biome-ignore lint/performance/noImgElement: dynamic blob/data URLs require native img
   <img
     alt=""
     className={cn("h-8 w-8 rounded border object-cover", className)}
@@ -187,7 +186,7 @@ export const QueueList = ({
   className,
   ...props
 }: QueueListProps) => (
-  <ScrollArea className={cn("-mb-1 mt-2", className)} {...props}>
+  <ScrollArea className={cn("mt-2 -mb-1", className)} {...props}>
     <div className="max-h-40 pr-4">
       <ul>{children}</ul>
     </div>
@@ -242,7 +241,7 @@ export const QueueSectionLabel = ({
   ...props
 }: QueueSectionLabelProps) => (
   <span className={cn("flex items-center gap-2", className)} {...props}>
-    <ChevronDownIcon className="group-data-[state=closed]:-rotate-90 size-4 transition-transform" />
+    <ChevronDownIcon className="size-4 transition-transform group-data-[state=closed]:-rotate-90" />
     {icon}
     <span>
       {count} {label}

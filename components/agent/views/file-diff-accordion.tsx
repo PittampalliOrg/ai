@@ -133,22 +133,22 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
   const dirPath = file.path.includes("/") ? file.path.substring(0, file.path.lastIndexOf("/")) : "";
 
   return (
-    <div className="rounded-xl border border-zinc-700/50 overflow-hidden bg-zinc-900/80 shadow-lg shadow-black/20">
+    <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm">
       {/* Header - Codex style with distinct background */}
-      <div className="flex w-full items-center justify-between px-4 py-3 bg-zinc-800/40 border-b border-zinc-700/30 hover:bg-zinc-800/60 transition-colors">
+      <div className="flex w-full items-center justify-between px-4 py-3 bg-muted/50 border-b border-border hover:bg-muted/80 transition-colors">
         <button
           onClick={onToggle}
           className="flex items-center gap-3 flex-1 text-left min-w-0"
         >
-          <span className="text-zinc-500 flex-shrink-0">
+          <span className="text-muted-foreground flex-shrink-0">
             {isExpanded ? <ChevronUpIcon size={16} /> : <ChevronDownIcon size={16} />}
           </span>
-          <span className="text-zinc-500 flex-shrink-0"><FileIcon size={16} /></span>
+          <span className="text-muted-foreground flex-shrink-0"><FileIcon size={16} /></span>
           <span className="truncate">
             {dirPath && (
-              <span className="text-zinc-500 text-sm">{dirPath}/</span>
+              <span className="text-muted-foreground text-sm">{dirPath}/</span>
             )}
-            <span className="font-medium text-zinc-200 text-sm">{fileName}</span>
+            <span className="font-medium text-foreground text-sm">{fileName}</span>
           </span>
         </button>
 
@@ -165,14 +165,14 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
 
           {/* New badge (Codex green pill style) or Change stats */}
           {file.isNew ? (
-            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
               New
             </span>
           ) : (
             <span className="text-xs font-mono tabular-nums">
-              <span className="text-emerald-400">+{diffResult.additions}</span>
+              <span className="text-emerald-600 dark:text-emerald-400">+{diffResult.additions}</span>
               {" "}
-              <span className="text-red-400">-{diffResult.deletions}</span>
+              <span className="text-red-600 dark:text-red-400">-{diffResult.deletions}</span>
             </span>
           )}
 
@@ -184,7 +184,7 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
                   variant="ghost"
                   size="sm"
                   onClick={handleCopyPath}
-                  className="h-7 w-7 p-0 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground hover:bg-muted"
                 >
                   {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
                 </Button>
@@ -202,19 +202,19 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
                 variant="ghost"
                 size="sm"
                 onClick={(e) => e.stopPropagation()}
-                className="h-7 w-7 p-0 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground hover:bg-muted"
               >
                 <MoreIcon size={14} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-zinc-900 border-zinc-800">
-              <DropdownMenuItem onClick={handleCopyPath} className="text-zinc-300 focus:bg-zinc-800 focus:text-zinc-100">
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleCopyPath}>
                 Copy file path
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleCopyContent} className="text-zinc-300 focus:bg-zinc-800 focus:text-zinc-100">
+              <DropdownMenuItem onClick={handleCopyContent}>
                 Copy file content
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={handleCopyDiff} className="text-zinc-300 focus:bg-zinc-800 focus:text-zinc-100">
+              <DropdownMenuItem onClick={handleCopyDiff}>
                 Copy diff
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -222,13 +222,15 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
         </div>
       </div>
 
-      {/* Diff Content */}
+      {/* Diff Content - scrollable for long files */}
       {isExpanded && (
-        viewMode === "unified" ? (
-          <UnifiedDiffView hunks={highlightedHunks} isLoading={isHighlighting} />
-        ) : (
-          <SplitDiffView hunks={highlightedHunks} isLoading={isHighlighting} />
-        )
+        <div className="max-h-[500px] overflow-y-auto">
+          {viewMode === "unified" ? (
+            <UnifiedDiffView hunks={highlightedHunks} isLoading={isHighlighting} />
+          ) : (
+            <SplitDiffView hunks={highlightedHunks} isLoading={isHighlighting} />
+          )}
+        </div>
       )}
     </div>
   );

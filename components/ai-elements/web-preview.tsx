@@ -1,8 +1,5 @@
 "use client";
 
-import { ChevronDownIcon } from "lucide-react";
-import type { ComponentProps, ReactNode } from "react";
-import { createContext, useContext, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -17,13 +14,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { ChevronDownIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
-export type WebPreviewContextValue = {
+export interface WebPreviewContextValue {
   url: string;
   setUrl: (url: string) => void;
   consoleOpen: boolean;
   setConsoleOpen: (open: boolean) => void;
-};
+}
 
 const WebPreviewContext = createContext<WebPreviewContextValue | null>(null);
 

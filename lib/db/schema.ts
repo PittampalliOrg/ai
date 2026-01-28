@@ -3,6 +3,7 @@ import {
   boolean,
   foreignKey,
   index,
+  integer,
   json,
   pgTable,
   primaryKey,
@@ -234,6 +235,12 @@ export const agentSession = pgTable("AgentSession", {
   workflowStatus: varchar("workflowStatus", {
     enum: ["none", "pending", "running", "suspended", "completed", "failed", "terminated"],
   }).default("none"),
+  // Workflow status cache (synced via Dapr pub/sub events)
+  workflowPhase: varchar("workflowPhase", { length: 50 }),  // clone|exploration|planning|awaiting_approval|executing|completed|failed
+  workflowProgress: integer("workflowProgress"),            // 0-100
+  workflowCurrentTask: text("workflowCurrentTask"),         // Current task title
+  workflowMessage: text("workflowMessage"),                 // Status message
+  workflowUpdatedAt: timestamp("workflowUpdatedAt"),        // Last status update time
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 }, (table) => ({

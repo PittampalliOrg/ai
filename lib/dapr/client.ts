@@ -275,6 +275,173 @@ export async function publish<T>(
 }
 
 // ============================================================================
+// Service Invocation API
+// ============================================================================
+
+/**
+ * Configuration for Dapr service invocation
+ */
+export interface ServiceInvokeOptions {
+  /** Target app ID (the Dapr app-id of the service to call) */
+  appId: string;
+  /** HTTP method */
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  /** Request path (e.g., "/api/workflow/123/status") */
+  path: string;
+  /** Request body (will be JSON stringified) */
+  body?: unknown;
+  /** Additional headers */
+  headers?: Record<string, string>;
+  /** Timeout in milliseconds (default: 30000) */
+  timeout?: number;
+  /** Query string parameters */
+  query?: Record<string, string>;
+}
+
+/**
+ * Response from Dapr service invocation
+ */
+export interface ServiceInvokeResponse<T = unknown> {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  data: T | null;
+  headers: Headers;
+}
+
+/**
+ * Invoke a Dapr service using the dapr-app-id header pattern.
+ *
+ * This is the recommended approach for service-to-service calls as it:
+ * - Requires minimal code changes (just add header)
+ * - Provides automatic mTLS encryption
+ * - Enables built-in retries and circuit breakers
+ * - Adds distributed tracing automatically
+ *
+ * @example
+ * ```ts
+ * // Call planner-agent's status endpoint
+ * const response = await invokeService<WorkflowStatus>({
+ *   appId: "planner-agent",
+ *   method: "GET",
+ *   path: `/api/workflow/${instanceId}/status`,
+ * });
+ *
+ * // Call planner-agent's approve endpoint
+ * const response = await invokeService({
+ *   appId: "planner-agent",
+ *   method: "POST",
+ *   path: `/api/workflow/${instanceId}/approve`,
+ *   body: { plan_id: "plan-123", approved: true },
+ * });
+ * ```
+ */
+export async function invokeService<T = unknown>(
+  options: ServiceInvokeOptions
+): Promise<ServiceInvokeResponse<T>> {
+  const {
+    appId,
+    method = "GET",
+    path,
+    body,
+    headers = {},
+    timeout = 30000,
+    query,
+  } = options;
+
+  // Build URL with query params
+  let url = daprUrl(path);
+  if (query && Object.keys(query).length > 0) {
+    const params = new URLSearchParams(query);
+    url += (url.includes("?") ? "&" : "?") + params.toString();
+  }
+
+  // Prepare request headers with dapr-app-id
+  const requestHeaders: Record<string, string> = {
+    "dapr-app-id": appId,
+    "Content-Type": "application/json",
+    ...headers,
+  };
+
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: requestHeaders,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    // Try to parse JSON response
+    let data: T | null = null;
+    const contentType = response.headers.get("Content-Type") || "";
+
+    if (contentType.includes("application/json")) {
+      try {
+        data = (await response.json()) as T;
+      } catch {
+        // Response body might be empty or invalid JSON
+        data = null;
+      }
+    } else if (response.ok && response.status !== 204) {
+      // Try to get text for non-JSON responses
+      const text = await response.text();
+      if (text) {
+        try {
+          data = JSON.parse(text) as T;
+        } catch {
+          // Not JSON, keep as null
+        }
+      }
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      data,
+      headers: response.headers,
+    };
+  } catch (error) {
+    console.error(`[Dapr] Service invocation failed for ${appId}${path}:`, error);
+
+    // Return a structured error response
+    const isTimeout = error instanceof DOMException && error.name === "TimeoutError";
+    const isConnectionError = error instanceof TypeError && error.message.includes("fetch");
+
+    return {
+      ok: false,
+      status: isTimeout ? 504 : isConnectionError ? 503 : 500,
+      statusText: isTimeout
+        ? "Gateway Timeout"
+        : isConnectionError
+          ? "Service Unavailable"
+          : "Internal Server Error",
+      data: null,
+      headers: new Headers(),
+    };
+  }
+}
+
+/**
+ * Check if Dapr service invocation is available for a target app
+ */
+export async function isServiceAvailable(appId: string): Promise<boolean> {
+  try {
+    // Try to invoke health endpoint via Dapr
+    const response = await invokeService({
+      appId,
+      method: "GET",
+      path: "/health",
+      timeout: 5000,
+    });
+    // Accept 200, 404 (endpoint might not exist), or other non-connection errors
+    return response.status !== 503 && response.status !== 504;
+  } catch {
+    return false;
+  }
+}
+
+// ============================================================================
 // Helper functions for known key patterns
 // ============================================================================
 
