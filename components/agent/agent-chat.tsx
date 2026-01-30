@@ -5,12 +5,8 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import { ArrowUpIcon, LoaderIcon } from "@/components/icons";
-import { ListTodo, Zap } from "lucide-react";
+import { ListTodo, Zap, Paperclip } from "lucide-react";
 import { AgentMessage } from "./agent-message";
 import { AgentTaskSidebar } from "./agent-task-sidebar";
 import { AgentExecutionPanel } from "./agent-execution-panel";
@@ -20,6 +16,23 @@ import { useAgentExecutionContextOptional } from "@/contexts/agent-execution-con
 import { useRalphWorkflow } from "@/hooks/use-ralph-workflow";
 import { generateUUID } from "@/lib/utils";
 import type { TabType } from "@/hooks/use-agent-execution";
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputTools,
+  PromptInputSubmit,
+  PromptInputButton,
+  usePromptInputAttachments,
+  type PromptInputMessage,
+} from "@/components/ai-elements/prompt-input";
+import {
+  Attachments,
+  Attachment,
+  AttachmentPreview,
+  AttachmentInfo,
+  AttachmentRemove,
+} from "@/components/ai-elements/attachments";
 
 /** Workflow mode: direct execution or planning with approval */
 type WorkflowMode = "direct" | "planning";
@@ -54,6 +67,43 @@ interface AgentChatProps {
   };
 }
 
+// Helper component for attachment button
+function AgentChatAttachmentButton() {
+  const attachments = usePromptInputAttachments();
+  return (
+    <PromptInputButton
+      type="button"
+      onClick={() => attachments.openFileDialog()}
+      className="text-muted-foreground hover:text-foreground"
+    >
+      <Paperclip className="size-4" />
+    </PromptInputButton>
+  );
+}
+
+// Helper component for attachment list
+function AgentChatAttachmentList() {
+  const attachments = usePromptInputAttachments();
+
+  if (attachments.files.length === 0) return null;
+
+  return (
+    <Attachments variant="inline" className="flex flex-wrap gap-2 px-3 pt-2">
+      {attachments.files.map((file) => (
+        <Attachment
+          key={file.id}
+          data={file}
+          onRemove={() => attachments.remove(file.id)}
+        >
+          <AttachmentPreview />
+          <AttachmentInfo />
+          <AttachmentRemove />
+        </Attachment>
+      ))}
+    </Attachments>
+  );
+}
+
 export function AgentChat({
   sessionId,
   initialMessages,
@@ -62,7 +112,6 @@ export function AgentChat({
   initialPrompt,
   targetRepository,
 }: AgentChatProps) {
-  const [inputValue, setInputValue] = useState("");
   const [isPanelMaximized, setIsPanelMaximized] = useState(false);
   const [selectedTab, setSelectedTab] = useState<TabType>("logs");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -72,7 +121,6 @@ export function AgentChat({
   const [ralphWorkflowStarted, setRalphWorkflowStarted] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasSubmittedInitialPrompt = useRef(false);
   const hasReceivedServerSetupLogs = useRef(false);
   const hasSwitchedToDiff = useRef(false);
@@ -126,7 +174,7 @@ export function AgentChat({
   }, []);
 
   // Use useChat with inline callbacks - matching the working chat.tsx pattern
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, stop } = useChat({
     id: sessionId,
     messages: initialMessages as UIMessage[],
     generateId: generateUUID,
@@ -273,9 +321,28 @@ export function AgentChat({
     }
   }, [initialPrompt, initialMessages.length, sendMessage]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputValue.trim() || isLoading) return;
+  const handleSubmit = useCallback(async (message: PromptInputMessage) => {
+    const text = message.text.trim();
+    if (!text || isLoading) {
+      throw new Error("Empty message or loading");
+    }
+
+    // Build message parts with attachments
+    const parts: Array<{ type: "text"; text: string } | { type: "file"; url: string; mediaType: string; filename?: string }> = [
+      { type: "text", text },
+    ];
+
+    // Add file attachments if any
+    for (const file of message.files) {
+      if (file.url) {
+        parts.push({
+          type: "file",
+          url: file.url,
+          mediaType: file.mediaType || "application/octet-stream",
+          filename: file.filename,
+        });
+      }
+    }
 
     // Planning mode: start Ralph workflow
     if (workflowMode === "planning" && targetRepository && !ralphWorkflowStarted) {
@@ -285,11 +352,11 @@ export function AgentChat({
       // Add a user message to show the prompt
       sendMessage({
         role: "user",
-        parts: [{ type: "text", text: inputValue }],
+        parts,
       });
 
       // Start the Ralph workflow
-      const success = await ralphWorkflow.startWorkflow(inputValue, {
+      const success = await ralphWorkflow.startWorkflow(text, {
         owner: targetRepository.owner,
         repo: targetRepository.repo,
         branch: targetRepository.branch,
@@ -298,26 +365,18 @@ export function AgentChat({
       if (!success) {
         console.error("[AgentChat] Failed to start Ralph workflow");
         setRalphWorkflowStarted(false);
+        throw new Error("Failed to start workflow");
       }
 
-      setInputValue("");
       return;
     }
 
     // Direct mode: use regular chat
     sendMessage({
       role: "user",
-      parts: [{ type: "text", text: inputValue }],
+      parts,
     });
-    setInputValue("");
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e);
-    }
-  };
+  }, [isLoading, workflowMode, targetRepository, ralphWorkflowStarted, sendMessage, ralphWorkflow]);
 
   const handleFollowUp = (message: string) => {
     sendMessage({
@@ -462,36 +521,36 @@ export function AgentChat({
                   : "Create a plan first, review it, then execute after approval."}
               </p>
 
-              <form onSubmit={handleSubmit} className="flex gap-2">
-                <Textarea
-                  ref={textareaRef}
-                  value={inputValue}
-                  onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={handleKeyDown}
+              <PromptInput
+                onSubmit={handleSubmit}
+                accept="image/*,.pdf,.txt,.md,.json,.csv"
+                multiple
+              >
+                {/* Attachments display */}
+                <AgentChatAttachmentList />
+
+                {/* Textarea */}
+                <PromptInputTextarea
                   placeholder={workflowMode === "planning"
                     ? "Describe your task for planning..."
                     : "Ask the agent to help with your code..."}
-                  className="min-h-[60px] resize-none"
                   disabled={isLoading || (workflowMode === "planning" && ralphWorkflowStarted)}
+                  className="min-h-[60px]"
                 />
-                <Button
-                  type="submit"
-                  disabled={!inputValue.trim() || isLoading || (workflowMode === "planning" && ralphWorkflowStarted)}
-                  className="h-auto px-4"
-                >
-                  {isLoading ? (
-                    <LoaderIcon size={20} />
-                  ) : (
-                    <ArrowUpIcon size={20} />
-                  )}
-                </Button>
-              </form>
-              {isLoading && (
-                <p className="mt-2 text-xs text-muted-foreground flex items-center gap-2">
-                  <LoaderIcon size={12} />
-                  Agent is working...
-                </p>
-              )}
+
+                {/* Footer with tools and submit */}
+                <PromptInputFooter>
+                  <PromptInputTools>
+                    <AgentChatAttachmentButton />
+                  </PromptInputTools>
+                  <PromptInputSubmit
+                    disabled={isLoading || (workflowMode === "planning" && ralphWorkflowStarted)}
+                    status={status}
+                    onStop={stop}
+                  />
+                </PromptInputFooter>
+              </PromptInput>
+
               {workflowMode === "planning" && ralphWorkflowStarted && ralphWorkflow.plan && (
                 <p className="mt-2 text-xs text-blue-600 dark:text-blue-400 flex items-center gap-2">
                   <ListTodo size={12} />

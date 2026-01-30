@@ -112,7 +112,7 @@ export function derivePhaseFromEvents(events: WorkflowStreamEvent[]): AgentPhase
     if (
       statusLower.includes("waiting for plan approval") ||
       statusLower.includes("plan ready for approval") ||
-      statusLower.includes("awaiting approval")
+      statusLower.includes("awaiting approval") || statusLower.includes("awaiting_approval")
     ) {
       return "approve";
     }

@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 import { useWorkflowExecution } from "@/contexts/workflow-execution-context";
 import { useWorkflow } from "@/hooks/use-workflows";
 import { useAgentSummary } from "@/hooks/use-agent-summary";
+import { useWorkflowApproval } from "@/hooks/use-workflow-approval";
+import { useTaskAggregation } from "@/hooks/use-task-aggregation";
 
 // Components
 import { derivePhase } from "./agent-phase-indicator";
@@ -48,12 +50,18 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   // Fetch workflow detail for plan information
   const { workflow } = useWorkflow(workflowId, 3000);
 
+  // Workflow approval handlers
+  const { approve, reject, isApproving } = useWorkflowApproval(workflowId);
+
   // Derive agent-specific state
   const phase = useMemo(() => derivePhase(events), [events]);
   const isAwaitingApproval = phase === "approve";
   const isStreaming = executionStatus === "running" && accumulatedText.length > 0;
 
   const taskPrompt = externalTaskPrompt ?? contextTaskPrompt;
+
+  // Aggregate tasks from events for the task queue
+  const { tasks, planStatus } = useTaskAggregation(events);
 
   // Use the agent summary hook
   const summary = useAgentSummary({
@@ -65,8 +73,8 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   });
 
   // Right panel state
-  const [isDetailPanelOpen, setDetailPanelOpen] = useState(false);
-  const [activeDetailTab, setActiveDetailTab] = useState<DetailTabType>("diff");
+  const [isDetailPanelOpen, setDetailPanelOpen] = useState(true);
+  const [activeDetailTab, setActiveDetailTab] = useState<DetailTabType>("logs");
 
   // Chat input state
   const [inputValue, setInputValue] = useState("");
@@ -97,6 +105,25 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
     setDetailPanelOpen(false);
   }, []);
 
+  // Plan approval handlers
+  const handlePlanApprove = useCallback(async () => {
+    const result = await approve();
+    if (result.success) {
+      console.log("Plan approved successfully");
+    } else {
+      console.error("Plan approval failed:", result.error);
+    }
+  }, [approve]);
+
+  const handlePlanReject = useCallback(async () => {
+    const result = await reject();
+    if (result.success) {
+      console.log("Plan rejected");
+    } else {
+      console.error("Plan rejection failed:", result.error);
+    }
+  }, [reject]);
+
   return (
     <div className={cn("flex h-full", className)}>
       {/* Left: Summary Panel (400px fixed) */}
@@ -112,6 +139,7 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
           onSubmit={handleSubmit}
           onStop={handleStop}
           onFilesClick={handleFilesClick}
+          tasks={tasks}
         />
       </div>
 
@@ -130,6 +158,8 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
             accumulatedText={accumulatedText}
             isStreaming={isStreaming}
             isConnected={isConnected}
+            onPlanApprove={handlePlanApprove}
+            onPlanReject={handlePlanReject}
           />
         </div>
       )}

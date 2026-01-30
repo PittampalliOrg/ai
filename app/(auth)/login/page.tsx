@@ -1,29 +1,33 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn, useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
 
 import { Button } from "@/components/ui/button";
 
-export default function Page() {
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session, status } = useSession();
   const [isLoading, setIsLoading] = useState(false);
 
-  // Redirect to home if already authenticated
+  const error = searchParams.get("error");
+  const callbackUrl = searchParams.get("callbackUrl") || "/agent";
+
+  // Redirect if already authenticated (and no error state)
   useEffect(() => {
-    if (status === "authenticated" && session) {
-      router.push("/");
+    if (status === "authenticated" && session && !session.error) {
+      router.push(callbackUrl);
     }
-  }, [status, session, router]);
+  }, [status, session, router, callbackUrl]);
 
   const handleGitHubSignIn = async () => {
     setIsLoading(true);
     try {
-      await signIn("github", { callbackUrl: "/" });
-    } catch (error) {
-      console.error("Sign in error:", error);
+      await signIn("github", { callbackUrl });
+    } catch (err) {
+      console.error("Sign in error:", err);
       setIsLoading(false);
     }
   };
@@ -39,6 +43,13 @@ export default function Page() {
             Sign in with your GitHub account to continue
           </p>
         </div>
+
+        {error === "session_expired" && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center text-amber-800 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+            <p className="font-medium text-sm">Your session has expired</p>
+            <p className="mt-1 text-xs">Please sign in again to continue.</p>
+          </div>
+        )}
 
         <Button
           onClick={handleGitHubSignIn}
@@ -66,5 +77,19 @@ export default function Page() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-dvh w-screen items-center justify-center bg-background">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }

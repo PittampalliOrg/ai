@@ -1,5 +1,5 @@
 import NextAuth, { type DefaultSession } from "next-auth";
-import type { DefaultJWT } from "next-auth/jwt";
+import type { DefaultJWT, JWT } from "next-auth/jwt";
 import GitHub from "next-auth/providers/github";
 import { isDevelopmentEnvironment } from "@/lib/constants";
 import { findOrCreateGitHubUser } from "@/lib/db/queries";
@@ -42,7 +42,7 @@ declare module "next-auth/jwt" {
  * Note: Standard GitHub OAuth tokens don't expire, but if "token expiration"
  * is enabled in the GitHub App settings, tokens expire after 8 hours.
  */
-async function refreshGitHubToken(token: DefaultJWT & { refreshToken?: string; accessToken?: string }) {
+async function refreshGitHubToken(token: JWT): Promise<JWT> {
   if (!token.refreshToken) {
     console.log("[Auth] No refresh token available - GitHub OAuth tokens are long-lived by default");
     return token;

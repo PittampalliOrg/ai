@@ -18,16 +18,35 @@ import { useState, useEffect, useCallback, useRef } from "react";
  */
 export type WorkflowStreamEventType =
   | "initial"
-  | "llm_chunk"
-  | "thinking"  // Claude's extended thinking (internal reasoning)
-  | "tool_call"
-  | "tool_result"
+  | "part"  // AI SDK-compatible part events (TextUIPart, ReasoningUIPart, DynamicToolUIPart)
+  | "llm_chunk"  // Legacy: text chunks
+  | "thinking"  // Legacy: Claude's extended thinking (internal reasoning)
+  | "tool_call"  // Legacy: tool invocation
+  | "tool_result"  // Legacy: tool result
   | "file_changed"
   | "task_progress"
   | "task_completed"
+  // Semantic task/plan events
+  | "task_created"  // Task created via TaskCreate tool
+  | "task_updated"  // Task status changed via TaskUpdate
+  | "plan_created"  // Agent entered plan mode via EnterPlanMode
+  | "plan_complete" // Agent completed plan via ExitPlanMode
   | "heartbeat"
   | "stream_timeout"
   | "error";
+
+/**
+ * Task data structure from Claude Code's native task system
+ */
+export interface TaskData {
+  id: string;
+  subject: string;
+  description: string;
+  activeForm?: string;
+  status: "pending" | "in_progress" | "completed";
+  blocks?: string[];
+  blockedBy?: string[];
+}
 
 /**
  * Agent identifiers for multi-agent streaming
@@ -36,12 +55,40 @@ export type AgentId = "claude-planner" | "claude-code-agent";
 
 /**
  * Data payload for different event types
+ *
+ * For "part" events, the data contains AI SDK UI Part structures:
+ * - TextUIPart: { type: "text", text: string, state?: "streaming" | "done" }
+ * - ReasoningUIPart: { type: "reasoning", text: string, state?: "streaming" | "done" }
+ * - DynamicToolUIPart: { type: "dynamic-tool", toolCallId: string, toolName: string, state: ..., input: ..., output?: ..., errorText?: ... }
  */
 export interface WorkflowStreamEventData {
+  // AI SDK Part type identifier (for "part" events)
+  /** Part type: "text" | "reasoning" | "dynamic-tool" */
+  type?: string;
+  /** Text content for text/reasoning parts and llm_chunk events */
+  text?: string;
+  /** State for AI SDK parts: "streaming" | "done" | tool states */
+  state?: string;
+  /** Tool call ID for dynamic-tool parts */
+  toolCallId?: string;
+  /** Input for dynamic-tool parts */
+  input?: unknown;
+  /** Output for dynamic-tool parts */
+  output?: unknown;
+  /** Error text for dynamic-tool parts */
+  errorText?: string;
+
+  // Semantic task/plan event fields
+  /** Task data for task_created events */
+  task?: TaskData;
+  /** Task ID for task_updated events */
+  taskId?: string;
+  /** New status for task_updated events */
+  taskStatus?: "pending" | "in_progress" | "completed";
+
+  // Legacy fields (for backward compatibility)
   /** Text content for llm_chunk events */
   content?: string;
-  /** Text content for llm_chunk events (alternate field from backend) */
-  text?: string;
   /** Tool name for tool_call/tool_result events */
   toolName?: string;
   /** Tool input for tool_call events */
@@ -408,16 +455,30 @@ export function getEventTypeLabel(type: WorkflowStreamEventType): string {
   switch (type) {
     case "initial":
       return "Initial State";
+    case "part":
+      return "AI Part";
     case "llm_chunk":
       return "LLM Response";
+    case "thinking":
+      return "Thinking";
     case "tool_call":
       return "Tool Call";
     case "tool_result":
       return "Tool Result";
+    case "file_changed":
+      return "File Changed";
     case "task_progress":
       return "Progress";
     case "task_completed":
       return "Completed";
+    case "task_created":
+      return "Task Created";
+    case "task_updated":
+      return "Task Updated";
+    case "plan_created":
+      return "Plan Started";
+    case "plan_complete":
+      return "Plan Complete";
     case "heartbeat":
       return "Heartbeat";
     case "stream_timeout":
@@ -436,16 +497,30 @@ export function getEventTypeColor(type: WorkflowStreamEventType): string {
   switch (type) {
     case "initial":
       return "text-blue-600";
+    case "part":
+      return "text-cyan-600";
     case "llm_chunk":
       return "text-green-600";
+    case "thinking":
+      return "text-amber-600";
     case "tool_call":
       return "text-purple-600";
     case "tool_result":
       return "text-indigo-600";
+    case "file_changed":
+      return "text-pink-600";
     case "task_progress":
       return "text-yellow-600";
     case "task_completed":
       return "text-emerald-600";
+    case "task_created":
+      return "text-teal-600";
+    case "task_updated":
+      return "text-sky-600";
+    case "plan_created":
+      return "text-violet-600";
+    case "plan_complete":
+      return "text-lime-600";
     case "heartbeat":
       return "text-gray-400";
     case "stream_timeout":
@@ -455,4 +530,20 @@ export function getEventTypeColor(type: WorkflowStreamEventType): string {
     default:
       return "text-gray-600";
   }
+}
+
+/**
+ * Check if a tool name is a task-related tool
+ */
+export function isTaskTool(toolName: string): boolean {
+  const taskTools = ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"];
+  return taskTools.includes(toolName);
+}
+
+/**
+ * Check if a tool name is a plan-related tool
+ */
+export function isPlanTool(toolName: string): boolean {
+  const planTools = ["EnterPlanMode", "ExitPlanMode"];
+  return planTools.includes(toolName);
 }

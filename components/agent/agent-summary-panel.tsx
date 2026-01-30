@@ -33,7 +33,9 @@ import {
 // Local imports
 import { AgentChatInput } from "./agent-chat-input";
 import { PlanApprovalSection } from "./plan-approval-section";
+import { AgentTaskQueue } from "./agent-task-queue";
 import type { AgentSummary, AgentTask, AgentFileSummary } from "@/hooks/use-agent-summary";
+import type { TaskData } from "@/hooks/use-workflow-stream";
 
 // ============================================================================
 // Types
@@ -50,6 +52,8 @@ interface AgentSummaryPanelProps {
   onSubmit: () => void;
   onStop?: () => void;
   onFilesClick: () => void;
+  /** Aggregated tasks from workflow events for the task queue */
+  tasks?: TaskData[];
   className?: string;
 }
 
@@ -332,6 +336,7 @@ export const AgentSummaryPanel = memo(function AgentSummaryPanel({
   onSubmit,
   onStop,
   onFilesClick,
+  tasks = [],
   className,
 }: AgentSummaryPanelProps) {
   const { taskPrompt, executionTime, plan, files, isStreaming } = summary;
@@ -349,6 +354,18 @@ export const AgentSummaryPanel = memo(function AgentSummaryPanel({
           <ExecutionTimeLine time={executionTime} isStreaming={isStreaming} />
         </div>
 
+        {/* Task Queue - pinned progress tracker */}
+        {tasks.length > 0 && (
+          <AgentTaskQueue
+            tasks={tasks}
+            isStreaming={isStreaming}
+            defaultOpen={true}
+            showDescriptions={false}
+            maxVisibleTasks={8}
+            className="mb-6"
+          />
+        )}
+
         {/* Content sections */}
         <div className="space-y-6">
           {/* Summary Section */}
@@ -356,8 +373,8 @@ export const AgentSummaryPanel = memo(function AgentSummaryPanel({
             <SummarySection bullets={summary.summary} />
           )}
 
-          {/* Plan Section - only when we have actual plan tasks */}
-          {hasRealPlan && (
+          {/* Plan Section - only when we have actual plan tasks (skip if task queue is shown) */}
+          {hasRealPlan && tasks.length === 0 && (
             <PlanSection plan={plan} isStreaming={isStreaming} />
           )}
 

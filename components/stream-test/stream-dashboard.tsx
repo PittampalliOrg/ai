@@ -231,6 +231,7 @@ function ParsedEventView({ events }: ParsedEventViewProps) {
   const eventsByType = useMemo(() => {
     const groups: Record<WorkflowStreamEventType, WorkflowStreamEvent[]> = {
       initial: [],
+      part: [],
       llm_chunk: [],
       thinking: [],
       tool_call: [],
@@ -238,6 +239,10 @@ function ParsedEventView({ events }: ParsedEventViewProps) {
       file_changed: [],
       task_progress: [],
       task_completed: [],
+      task_created: [],
+      task_updated: [],
+      plan_created: [],
+      plan_complete: [],
       heartbeat: [],
       stream_timeout: [],
       error: [],

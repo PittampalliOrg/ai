@@ -33,25 +33,40 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Public routes that don't require authentication
+  const isPublicRoute = ["/login", "/register"].includes(pathname);
+
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
     secureCookie: !isDevelopmentEnvironment,
   });
 
+  // Handle token refresh errors - redirect to login with error indicator
+  // Skip if already on login page to prevent redirect loop
+  if (token?.error === "RefreshTokenError" && !isPublicRoute) {
+    console.log("[Proxy] Token refresh error detected, redirecting to login");
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", pathname);
+    loginUrl.searchParams.set("error", "session_expired");
+    return NextResponse.redirect(loginUrl);
+  }
+
   // Redirect to login if not authenticated
   if (!token) {
     // Allow public routes
-    if (["/login", "/register"].includes(pathname)) {
+    if (isPublicRoute) {
       return NextResponse.next();
     }
 
-    return NextResponse.redirect(new URL("/login", request.url));
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
-  // Redirect authenticated users away from auth pages
-  if (token && ["/login", "/register"].includes(pathname)) {
-    return NextResponse.redirect(new URL("/", request.url));
+  // Redirect authenticated users away from auth pages (only if no token error)
+  if (token && !token.error && isPublicRoute) {
+    return NextResponse.redirect(new URL("/agent", request.url));
   }
 
   return NextResponse.next();
@@ -61,6 +76,8 @@ export const config = {
   matcher: [
     "/",
     "/chat/:id",
+    "/agent",
+    "/agent/:id",
     "/api/:path*",
     "/login",
     "/register",

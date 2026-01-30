@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { auth } from "@/app/(auth)/auth";
+import { auth, signOut } from "@/app/(auth)/auth";
 import { redirect } from "next/navigation";
 import { getAgentSessionsByUserId } from "@/lib/db/agent-queries";
 import { AgentHome } from "@/components/agent/agent-home";
@@ -36,6 +36,13 @@ async function AgentPage() {
 
   if (!session?.user) {
     redirect("/login?callbackUrl=/agent");
+  }
+
+  // Handle token refresh errors - sign out and redirect to re-authenticate
+  if (session.error === "RefreshTokenError") {
+    console.log("[AgentPage] Token refresh error detected, signing out");
+    await signOut({ redirect: false });
+    redirect("/login?callbackUrl=/agent&error=session_expired");
   }
 
   const sessions = await getAgentSessionsByUserId({ userId: session.user.id });

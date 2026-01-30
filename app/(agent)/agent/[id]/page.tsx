@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { auth } from "@/app/(auth)/auth";
+import { auth, signOut } from "@/app/(auth)/auth";
 import { redirect, notFound } from "next/navigation";
 import { getAgentSession, getAgentMessages, getTargetRepository } from "@/lib/db/agent-queries";
 import { AgentChat } from "@/components/agent/agent-chat";
@@ -26,6 +26,13 @@ async function AgentSessionPage({ params }: AgentSessionPageProps) {
 
   if (!session?.user) {
     redirect("/login?callbackUrl=/agent");
+  }
+
+  // Handle token refresh errors - sign out and redirect to re-authenticate
+  if (session.error === "RefreshTokenError") {
+    console.log("[AgentPage] Token refresh error detected, signing out");
+    await signOut({ redirect: false });
+    redirect("/login?callbackUrl=/agent&error=session_expired");
   }
 
   const agentSession = await getAgentSession({ id });
@@ -67,7 +74,7 @@ async function AgentSessionPage({ params }: AgentSessionPageProps) {
   if (hasWorkflow) {
     return (
       <WorkflowExecutionProvider
-        workflowId={id} // Use session ID - events are published keyed by session ID
+        workflowId={agentSession.workflowId!} // Use actual workflow ID - events are published keyed by workflow ID
         initialTaskPrompt={taskPromptText}
       >
         <div className="flex h-dvh flex-col">

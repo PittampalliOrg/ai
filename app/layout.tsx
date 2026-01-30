@@ -79,7 +79,14 @@ export default function RootLayout({
           enableSystem
         >
           <Toaster position="top-center" />
-          <SessionProvider>{children}</SessionProvider>
+          <SessionProvider
+            // Refetch session every 5 minutes to detect token expiration
+            refetchInterval={5 * 60}
+            // Refetch when window regains focus
+            refetchOnWindowFocus={true}
+          >
+            {children}
+          </SessionProvider>
         </ThemeProvider>
       </body>
     </html>
