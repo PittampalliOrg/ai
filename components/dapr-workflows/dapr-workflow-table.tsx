@@ -24,7 +24,7 @@ import {
   type WorkflowListItem,
   type WorkflowUIStatus,
 } from "@/lib/types/workflow-ui";
-import { formatTimestamp, formatDateTime, calculateDuration } from "@/lib/transforms/workflow-ui";
+import { formatTimestamp, formatAbsoluteTimestamp, calculateDuration } from "@/lib/transforms/workflow-ui";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 
@@ -118,7 +118,9 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
   const router = useRouter();
 
   const handleClick = () => {
-    router.push(`/dapr-workflows/${workflow.appId}/${workflow.instanceId}`);
+    if (workflow.instanceId && workflow.appId) {
+      router.push(`/dapr-workflows/${workflow.appId}/${workflow.instanceId}`);
+    }
   };
 
   const customStatus = workflow.customStatus;
@@ -126,7 +128,10 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
 
   return (
     <TableRow
-      className="cursor-pointer hover:bg-[#252c3d] border-b border-gray-700"
+      className={cn(
+        "border-b border-gray-700",
+        workflow.instanceId ? "cursor-pointer hover:bg-[#252c3d]" : "opacity-50"
+      )}
       onClick={handleClick}
     >
       <TableCell>
@@ -142,11 +147,11 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="font-mono text-sm text-white cursor-help">
-              {workflow.instanceId.substring(0, 8)}...
+              {workflow.instanceId ? `${workflow.instanceId.substring(0, 20)}${workflow.instanceId.length > 20 ? "..." : ""}` : "-"}
             </span>
           </TooltipTrigger>
           <TooltipContent side="top" className="font-mono text-xs">
-            {workflow.instanceId}
+            {workflow.instanceId || "Unknown"}
           </TooltipContent>
         </Tooltip>
       </TableCell>
@@ -191,7 +196,7 @@ function WorkflowRow({ workflow }: { workflow: WorkflowListItem }) {
             </span>
           </TooltipTrigger>
           <TooltipContent side="top" className="text-xs">
-            {formatDateTime(workflow.startTime)}
+            {formatAbsoluteTimestamp(workflow.startTime)}
           </TooltipContent>
         </Tooltip>
       </TableCell>
@@ -257,8 +262,8 @@ export function DaprWorkflowTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {workflows.map((workflow) => (
-            <WorkflowRow key={workflow.instanceId} workflow={workflow} />
+          {workflows.map((workflow, index) => (
+            <WorkflowRow key={workflow.instanceId || `workflow-${index}`} workflow={workflow} />
           ))}
         </TableBody>
       </Table>

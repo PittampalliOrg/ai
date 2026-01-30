@@ -78,39 +78,99 @@ const TOOL_LABELS: Record<string, string> = {
 
 /**
  * Extract tool history from workflow events
+ *
+ * Uses callId to correlate tool_call events with their tool_result events.
+ * This is critical when multiple tools of the same type are called concurrently.
  */
 export function extractToolHistory(events: WorkflowStreamEvent[]): ToolHistoryItem[] {
   const history: ToolHistoryItem[] = [];
+  // Map by callId (or event.id as fallback) to properly match calls with results
   const pendingCalls = new Map<string, ToolHistoryItem>();
 
   for (const event of events) {
     if (event.type === "tool_call" && event.data.toolName) {
+      // Use callId if available, otherwise fall back to event.id
+      const callId = event.data.callId || event.id;
       const item: ToolHistoryItem = {
-        id: event.id,
+        id: callId,
         toolName: event.data.toolName,
         toolInput: event.data.toolInput,
         status: "running",
         startTime: new Date(event.timestamp),
       };
-      pendingCalls.set(event.data.toolName, item);
+      pendingCalls.set(callId, item);
       history.push(item);
-    } else if (event.type === "tool_result" && event.data.toolName) {
-      const pending = pendingCalls.get(event.data.toolName);
-      if (pending) {
-        pending.toolOutput = event.data.toolOutput;
-        pending.status = event.data.error ? "error" : "success";
-        pending.endTime = new Date(event.timestamp);
-        pending.duration = pending.endTime.getTime() - pending.startTime.getTime();
-        pendingCalls.delete(event.data.toolName);
-      } else {
-        // Result without matching call - add it anyway
-        history.push({
-          id: event.id,
-          toolName: event.data.toolName,
-          toolOutput: event.data.toolOutput,
-          status: event.data.error ? "error" : "success",
+    } else if (event.type === "tool_result") {
+      // Look up by callId to find the matching tool call
+      const callId = event.data.callId;
+      if (callId) {
+        const pending = pendingCalls.get(callId);
+        if (pending) {
+          pending.toolOutput = event.data.toolOutput || event.data.result;
+          pending.status = event.data.error || event.data.isError ? "error" : "success";
+          pending.endTime = new Date(event.timestamp);
+          pending.duration = pending.endTime.getTime() - pending.startTime.getTime();
+          pendingCalls.delete(callId);
+        } else if (event.data.toolName) {
+          // Result without matching call - add it anyway
+          history.push({
+            id: callId,
+            toolName: event.data.toolName,
+            toolOutput: event.data.toolOutput || event.data.result,
+            status: event.data.error || event.data.isError ? "error" : "success",
+            startTime: new Date(event.timestamp),
+          });
+        }
+      } else if (event.data.toolName) {
+        // Legacy: no callId, try to match by toolName (less reliable)
+        const pending = pendingCalls.get(event.data.toolName);
+        if (pending) {
+          pending.toolOutput = event.data.toolOutput || event.data.result;
+          pending.status = event.data.error || event.data.isError ? "error" : "success";
+          pending.endTime = new Date(event.timestamp);
+          pending.duration = pending.endTime.getTime() - pending.startTime.getTime();
+          pendingCalls.delete(event.data.toolName);
+        }
+      }
+    } else if (event.type === "part" && event.data.type === "dynamic-tool") {
+      // AI SDK format: "part" events with "dynamic-tool" type
+      const toolCallId = event.data.toolCallId as string | undefined;
+      const toolName = event.data.toolName as string | undefined;
+      const state = event.data.state as string | undefined;
+
+      if (state === "input-available" && toolName) {
+        // New tool call
+        const id = toolCallId || event.id;
+        const item: ToolHistoryItem = {
+          id,
+          toolName,
+          toolInput: event.data.input,
+          status: "running",
           startTime: new Date(event.timestamp),
-        });
+        };
+        pendingCalls.set(id, item);
+        history.push(item);
+      } else if ((state === "output-available" || state === "output-error") && toolCallId) {
+        // Tool result
+        const pending = pendingCalls.get(toolCallId);
+        if (pending) {
+          const output = event.data.output || event.data.errorText;
+          pending.toolOutput = typeof output === "string" ? output : JSON.stringify(output);
+          pending.status = state === "output-error" ? "error" : "success";
+          pending.endTime = new Date(event.timestamp);
+          pending.duration = pending.endTime.getTime() - pending.startTime.getTime();
+          pendingCalls.delete(toolCallId);
+        } else if (toolName) {
+          // Result without matching call - add it anyway
+          const output = event.data.output || event.data.errorText;
+          history.push({
+            id: toolCallId,
+            toolName,
+            toolOutput: typeof output === "string" ? output : JSON.stringify(output),
+            status: state === "output-error" ? "error" : "success",
+            startTime: new Date(event.timestamp),
+          });
+        }
       }
     }
   }

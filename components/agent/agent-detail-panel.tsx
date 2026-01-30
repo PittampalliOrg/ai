@@ -218,7 +218,7 @@ const MergedLogsView = memo(function MergedLogsView({
 // Activity Entry Types and Components
 // ============================================================================
 
-type ActivityType = "thinking" | "text" | "tool_call" | "tool_result" | "progress" | "error";
+type ActivityType = "thinking" | "text" | "tool_call" | "tool_result" | "progress" | "error" | "part";
 
 interface ActivityItem {
   id: string;
@@ -369,6 +369,101 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
           status: "error",
         });
         break;
+
+      case "part": {
+        // Handle AI SDK "part" events
+        const partType = event.data.type;
+
+        if (partType === "dynamic-tool") {
+          // Tool call/result in AI SDK format
+          const toolCallId = event.data.toolCallId as string | undefined;
+          const toolName = event.data.toolName as string | undefined;
+          const state = event.data.state as string | undefined;
+
+          if (state === "input-available") {
+            // New tool call
+            flushText(event.agentId);
+            const toolItem: ActivityItem = {
+              id: toolCallId || event.id,
+              type: "tool_call",
+              timestamp: new Date(event.timestamp),
+              toolName: toolName || "unknown",
+              toolInput: event.data.input as Record<string, unknown>,
+              status: "running",
+              agentId: event.agentId,
+            };
+            items.push(toolItem);
+            if (toolCallId) {
+              pendingToolCalls.set(toolCallId, toolItem);
+            }
+          } else if (state === "output-available" || state === "output-error") {
+            // Tool result
+            flushText(event.agentId);
+            const isError = state === "output-error";
+            const output = (event.data.output as string) || (event.data.errorText as string) || "";
+
+            // Try to match with pending call by toolCallId
+            let matched = toolCallId ? pendingToolCalls.get(toolCallId) : null;
+            if (!matched) {
+              // Fallback: find any running tool call with same name
+              matched = items.find(
+                (i) => i.type === "tool_call" && i.status === "running" && i.toolName === toolName
+              ) || null;
+            }
+
+            if (matched) {
+              matched.status = isError ? "error" : "success";
+              matched.toolOutput = typeof output === "string" ? output : JSON.stringify(output);
+              if (toolCallId) pendingToolCalls.delete(toolCallId);
+            } else {
+              // No matching call found, add as standalone result
+              items.push({
+                id: toolCallId || event.id,
+                type: "tool_result",
+                timestamp: new Date(event.timestamp),
+                toolName: toolName || "unknown",
+                toolOutput: typeof output === "string" ? output : JSON.stringify(output),
+                status: isError ? "error" : "success",
+                agentId: event.agentId,
+              });
+            }
+          }
+        } else if (partType === "text") {
+          // Text content in AI SDK format
+          const text = event.data.text as string | undefined;
+          if (text) {
+            const agent = event.agentId || "";
+            const existing = currentText.get(agent);
+            if (existing) {
+              existing.content = (existing.content || "") + text;
+            } else {
+              const entry: ActivityItem = {
+                id: `text-${event.id}`,
+                type: "text",
+                timestamp: new Date(event.timestamp),
+                content: text,
+                agentId: event.agentId,
+              };
+              items.push(entry);
+              currentText.set(agent, entry);
+            }
+          }
+        } else if (partType === "reasoning") {
+          // Reasoning/thinking in AI SDK format
+          flushText(event.agentId);
+          const text = event.data.text as string | undefined;
+          if (text && text.trim().length > 0) {
+            items.push({
+              id: `thinking-${event.id}`,
+              type: "thinking",
+              timestamp: new Date(event.timestamp),
+              content: text,
+              agentId: event.agentId,
+            });
+          }
+        }
+        break;
+      }
     }
   }
 

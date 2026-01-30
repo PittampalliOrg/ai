@@ -127,7 +127,8 @@ export function mapExecutionLogEvent(
 
 /**
  * Calculate duration between two timestamps
- * Returns human-readable string like "1.37m" or "45.2s"
+ * Returns human-readable string like "1m 23s" or "45s"
+ * Always uses seconds/minutes/hours (never milliseconds)
  */
 export function calculateDuration(
   startTime: string,
@@ -142,20 +143,39 @@ export function calculateDuration(
 
   const durationMs = end - start;
 
+  // Less than 1 second
   if (durationMs < 1000) {
-    return `${durationMs}ms`;
+    return "< 1s";
   }
+
+  // Less than 1 minute - show seconds
   if (durationMs < 60000) {
-    return `${(durationMs / 1000).toFixed(1)}s`;
+    const seconds = Math.floor(durationMs / 1000);
+    return `${seconds}s`;
   }
+
+  // Less than 1 hour - show minutes and seconds
   if (durationMs < 3600000) {
-    return `${(durationMs / 60000).toFixed(2)}m`;
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    if (seconds === 0) {
+      return `${minutes}m`;
+    }
+    return `${minutes}m ${seconds}s`;
   }
-  return `${(durationMs / 3600000).toFixed(2)}h`;
+
+  // 1 hour or more - show hours and minutes
+  const hours = Math.floor(durationMs / 3600000);
+  const minutes = Math.floor((durationMs % 3600000) / 60000);
+  if (minutes === 0) {
+    return `${hours}h`;
+  }
+  return `${hours}h ${minutes}m`;
 }
 
 /**
  * Calculate elapsed time for an event
+ * Always uses seconds/minutes/hours (never milliseconds)
  */
 export function calculateElapsed(
   eventTimestamp: string,
@@ -167,10 +187,35 @@ export function calculateElapsed(
   if (isNaN(event) || isNaN(reference)) return "-";
 
   const elapsedMs = event - reference;
+
+  // Less than 1 second
   if (elapsedMs < 1000) {
-    return `${elapsedMs.toFixed(1)}ms`;
+    return "< 1s";
   }
-  return `${(elapsedMs / 1000).toFixed(1)}s`;
+
+  // Less than 1 minute
+  if (elapsedMs < 60000) {
+    const seconds = Math.floor(elapsedMs / 1000);
+    return `${seconds}s`;
+  }
+
+  // Less than 1 hour
+  if (elapsedMs < 3600000) {
+    const minutes = Math.floor(elapsedMs / 60000);
+    const seconds = Math.floor((elapsedMs % 60000) / 1000);
+    if (seconds === 0) {
+      return `${minutes}m`;
+    }
+    return `${minutes}m ${seconds}s`;
+  }
+
+  // 1 hour or more
+  const hours = Math.floor(elapsedMs / 3600000);
+  const minutes = Math.floor((elapsedMs % 3600000) / 60000);
+  if (minutes === 0) {
+    return `${hours}h`;
+  }
+  return `${hours}h ${minutes}m`;
 }
 
 // ============================================================================
@@ -178,29 +223,117 @@ export function calculateElapsed(
 // ============================================================================
 
 /**
- * Format timestamp for display (includes date)
- * Format: "23 Jan 2026 1:06:20 PM"
+ * Format timestamp as relative time for recent entries, absolute for older ones.
+ * Uses EST timezone for display.
+ * - < 1 min: "Just now"
+ * - < 60 mins: "X mins ago"
+ * - < 24 hours: "X hours ago"
+ * - Yesterday: "Yesterday at 2:30 PM"
+ * - This week: "Monday at 2:30 PM"
+ * - Older: "Jan 23, 2026"
  */
-export function formatTimestamp(timestamp: string): string {
+export function formatRelativeTime(timestamp: string): string {
+  if (!timestamp || timestamp.trim() === "") return "-";
+
   const date = new Date(timestamp);
   if (isNaN(date.getTime())) return "-";
 
-  // Format date part: "23 Jan 2026"
-  const dateStr = date.toLocaleDateString("en-GB", {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  // Format time for use in combined strings (EST timezone)
+  const timeStr = date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/New_York",
+  });
+
+  // Less than 1 minute
+  if (diffMins < 1) {
+    return "Just now";
+  }
+
+  // Less than 60 minutes
+  if (diffMins < 60) {
+    return diffMins === 1 ? "1 min ago" : `${diffMins} mins ago`;
+  }
+
+  // Less than 24 hours
+  if (diffHours < 24) {
+    return diffHours === 1 ? "1 hour ago" : `${diffHours} hours ago`;
+  }
+
+  // Get date strings in EST for comparison
+  const estDateOptions: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: "America/New_York",
+  };
+  const nowDateStr = now.toLocaleDateString("en-US", estDateOptions);
+  const eventDateStr = date.toLocaleDateString("en-US", estDateOptions);
+
+  // Yesterday
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toLocaleDateString("en-US", estDateOptions);
+  if (eventDateStr === yesterdayStr) {
+    return `Yesterday at ${timeStr}`;
+  }
+
+  // Within the past week (show day name)
+  if (diffDays < 7) {
+    const dayName = date.toLocaleDateString("en-US", {
+      weekday: "long",
+      timeZone: "America/New_York",
+    });
+    return `${dayName} at ${timeStr}`;
+  }
+
+  // Older than a week - show date in EST
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "America/New_York",
+  });
+}
+
+/**
+ * Format timestamp for display (includes date)
+ * Uses relative time for recent entries, absolute for older ones
+ */
+export function formatTimestamp(timestamp: string): string {
+  return formatRelativeTime(timestamp);
+}
+
+/**
+ * Format timestamp as absolute date/time (for tooltips)
+ * Format: "23 Jan 2026 1:06:20 PM EST"
+ */
+export function formatAbsoluteTimestamp(timestamp: string): string {
+  if (!timestamp || timestamp.trim() === "") return "-";
+
+  const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return "-";
+
+  // Format in EST timezone
+  const options: Intl.DateTimeFormatOptions = {
     day: "numeric",
     month: "short",
     year: "numeric",
-  });
-
-  // Format time part: "1:06:20 PM"
-  const timeStr = date.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
     hour12: true,
-  });
+    timeZone: "America/New_York",
+  };
 
-  return `${dateStr} ${timeStr}`;
+  return date.toLocaleString("en-US", options);
 }
 
 /**
