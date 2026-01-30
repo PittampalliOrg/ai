@@ -266,13 +266,26 @@ function PlanTasksSection({ workflow }: PlanTasksSectionProps) {
                   </span>
                   <PlanTaskStatusBadge status={task.status} size="sm" />
                 </div>
-                {task.dependsOn && task.dependsOn.length > 0 && (
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                    Depends on: {task.dependsOn.join(", ")}
-                  </span>
-                )}
+                <div className="flex flex-wrap gap-1">
+                  {task.blockedBy && task.blockedBy.length > 0 && (
+                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                      Blocked by: {task.blockedBy.join(", ")}
+                    </span>
+                  )}
+                  {task.blocks && task.blocks.length > 0 && (
+                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                      Blocks: {task.blocks.join(", ")}
+                    </span>
+                  )}
+                  {/* Backwards compat: show dependsOn if no blockedBy */}
+                  {!task.blockedBy?.length && task.dependsOn && task.dependsOn.length > 0 && (
+                    <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">
+                      Depends on: {task.dependsOn.join(", ")}
+                    </span>
+                  )}
+                </div>
               </div>
-              <p className="text-sm font-medium">{task.title}</p>
+              <p className="text-sm font-medium">{task.subject || task.title}</p>
               {task.description && (
                 <p className="text-xs text-muted-foreground">{task.description}</p>
               )}

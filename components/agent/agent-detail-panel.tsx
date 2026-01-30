@@ -6,35 +6,27 @@
  * Right panel with toggleable tabs:
  * - Diff: Existing DiffView component
  * - Logs: Merged activity + logs content
- *
- * Events from server.ts are emitted in AI SDK-compatible format:
- * - type: "part" with data matching TextUIPart, ReasoningUIPart, or DynamicToolUIPart
- *
- * For backward compatibility, legacy event types are also supported.
  */
 
 import { memo, useMemo, useRef, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, ArrowDownIcon, ChevronRight, ListTodoIcon, PlayCircleIcon, CheckCircle2Icon } from "lucide-react";
+import { X, ArrowDownIcon, ChevronRight } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import type { WorkflowStreamEvent, TaskData } from "@/hooks/use-workflow-stream";
-import { isTaskTool, isPlanTool } from "@/hooks/use-workflow-stream";
-import { useTaskAggregation } from "@/hooks/use-task-aggregation";
+import type { WorkflowStreamEvent } from "@/hooks/use-workflow-stream";
 import type { FileChange, WorkflowLogEntry } from "@/contexts/workflow-execution-context";
-import type { TextUIPart, ReasoningUIPart, DynamicToolUIPart } from "ai";
 
 // Existing components
 import { DiffView } from "@/components/agent/views/diff-view";
 import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 
-// Task/Plan components
-import { AgentTaskCard } from "./agent-task-card";
-import { AgentPlanCard, type PlanStatus } from "./agent-plan-card";
+// Progress tab components
+import { AgentPhaseIndicator } from "./agent-phase-indicator";
+import { PlanApprovalSection } from "./plan-approval-section";
 
 // AI Elements for activity display
 import {
@@ -54,7 +46,7 @@ import {
 // Types
 // ============================================================================
 
-export type DetailTabType = "diff" | "logs";
+export type DetailTabType = "diff" | "logs" | "progress";
 
 interface AgentDetailPanelProps {
   activeTab: DetailTabType;
@@ -70,9 +62,13 @@ interface AgentDetailPanelProps {
   accumulatedText: string;
   isStreaming: boolean;
   isConnected: boolean;
-  // Plan approval handlers
-  onPlanApprove?: () => void;
-  onPlanReject?: () => void;
+  // Progress tab props
+  workflowId?: string | null;
+  isWorkflowActive?: boolean;
+  isAwaitingApproval?: boolean;
+  workflow?: { plan?: { title?: string; summary?: string; tasks?: Array<{ id: string; subject?: string; title?: string; description?: string }> }; status?: string } | null;
+  statusMessage?: string | null;
+  progress?: number | null;
   className?: string;
 }
 
@@ -114,11 +110,7 @@ interface MergedLogsViewProps {
   accumulatedText: string;
   isStreaming: boolean;
   isConnected: boolean;
-  onPlanApprove?: () => void;
-  onPlanReject?: () => void;
 }
-
-// useTaskAggregation is now imported from "@/hooks/use-task-aggregation"
 
 const MergedLogsView = memo(function MergedLogsView({
   events,
@@ -126,8 +118,6 @@ const MergedLogsView = memo(function MergedLogsView({
   accumulatedText,
   isStreaming,
   isConnected,
-  onPlanApprove,
-  onPlanReject,
 }: MergedLogsViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -151,9 +141,6 @@ const MergedLogsView = memo(function MergedLogsView({
   const activityItems = useMemo(() => {
     return eventsToActivityItems(events);
   }, [events]);
-
-  // Aggregate tasks for plan card
-  const { tasks, planStatus, hasActivePlan } = useTaskAggregation(events);
 
   const isEmpty = activityItems.length === 0 && logs.length === 0 && !accumulatedText;
 
@@ -190,38 +177,10 @@ const MergedLogsView = memo(function MergedLogsView({
           </div>
         ) : (
           <>
-            {/* Aggregated Plan Card at top when tasks exist */}
-            {hasActivePlan && tasks.length > 0 && (
-              <AgentPlanCard
-                title="Implementation Plan"
-                tasks={tasks}
-                status={planStatus}
-                isStreaming={isStreaming && planStatus === "planning"}
-                onApprove={onPlanApprove}
-                onReject={onPlanReject}
-                className="mb-4"
-              />
-            )}
-
-            {/* Activity items (filtered to avoid duplicate task displays) */}
-            {activityItems
-              .filter((item) => {
-                // Skip task_created events when we have plan card (they're shown there)
-                if (hasActivePlan && tasks.length > 0 && item.type === "task_created") {
-                  return false;
-                }
-                // Skip TaskCreate tool parts when we have plan card
-                if (hasActivePlan && tasks.length > 0 && item.type === "part" && item.part) {
-                  const part = item.part;
-                  if (isDynamicToolPart(part) && part.toolName === "TaskCreate") {
-                    return false;
-                  }
-                }
-                return true;
-              })
-              .map((item) => (
-                <ActivityEntry key={item.id} item={item} allTasks={tasks} />
-              ))}
+            {/* Activity items */}
+            {activityItems.map((item) => (
+              <ActivityEntry key={item.id} item={item} />
+            ))}
 
             {/* Streaming text */}
             {isStreaming && accumulatedText && (
@@ -259,77 +218,54 @@ const MergedLogsView = memo(function MergedLogsView({
 // Activity Entry Types and Components
 // ============================================================================
 
-// Union type for AI SDK UI parts we handle
-type AgentUIPart = TextUIPart | ReasoningUIPart | DynamicToolUIPart;
-
-// Activity item types - supports both new AI SDK format and legacy format
-type ActivityType = "part" | "thinking" | "text" | "tool_call" | "tool_result" | "progress" | "error" | "task_created" | "task_updated" | "plan_created" | "plan_complete";
+type ActivityType = "thinking" | "text" | "tool_call" | "tool_result" | "progress" | "error";
 
 interface ActivityItem {
   id: string;
   type: ActivityType;
   timestamp: Date;
-  // For new AI SDK part format
-  part?: AgentUIPart;
-  // Legacy format fields
   toolName?: string;
   toolInput?: Record<string, unknown>;
   toolOutput?: string;
   content?: string;
   status?: "running" | "success" | "error";
   agentId?: string;
-  // Task-related fields
-  task?: TaskData;
-  taskId?: string;
-  taskStatus?: "pending" | "in_progress" | "completed";
-}
-
-/**
- * Type guards for AI SDK UI parts
- */
-function isTextPart(part: AgentUIPart): part is TextUIPart {
-  return part.type === "text";
-}
-
-function isReasoningPart(part: AgentUIPart): part is ReasoningUIPart {
-  return part.type === "reasoning";
-}
-
-function isDynamicToolPart(part: AgentUIPart): part is DynamicToolUIPart {
-  return part.type === "dynamic-tool";
 }
 
 /**
  * Convert events to activity items
- *
- * Supports two event formats:
- * 1. NEW: AI SDK-compatible "part" events with data matching TextUIPart, ReasoningUIPart, DynamicToolUIPart
- * 2. LEGACY: Individual event types (thinking, llm_chunk, tool_call, tool_result)
  */
 function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
   const items: ActivityItem[] = [];
   const pendingToolCalls = new Map<string, ActivityItem>();
 
+  // Track current text accumulator per agent so consecutive llm_chunks
+  // merge into one entry, but a non-chunk event flushes to a new entry.
+  const currentText = new Map<string, ActivityItem>();
+
+  const flushText = (agentId?: string) => {
+    if (agentId !== undefined) {
+      const entry = currentText.get(agentId);
+      if (entry && entry.content && entry.content.trim().length > 0) {
+        // already pushed into items
+      }
+      currentText.delete(agentId);
+    } else {
+      currentText.clear();
+    }
+  };
+
+  const flushAllText = () => {
+    currentText.clear();
+  };
+
   for (const event of events) {
     switch (event.type) {
-      // NEW: AI SDK-compatible part events
-      case "part": {
-        const part = event.data as AgentUIPart;
-        items.push({
-          id: event.id,
-          type: "part",
-          timestamp: new Date(event.timestamp),
-          part,
-          agentId: event.agentId,
-        });
-        break;
-      }
-
-      // LEGACY: thinking events
       case "thinking":
+        flushText(event.agentId);
         if (event.data.content || event.data.text) {
           const content = (event.data.content || event.data.text || "") as string;
-          if (content.trim()) {
+          if (content.trim().length > 0) {
             items.push({
               id: `thinking-${event.id}`,
               type: "thinking",
@@ -341,32 +277,29 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         }
         break;
 
-      // LEGACY: llm_chunk events
       case "llm_chunk":
-        if (event.data.content || event.data.text) {
-          const content = (event.data.content || event.data.text || "") as string;
-          if (content.trim()) {
-            // Accumulate into a single text entry per agent
-            const existingText = items.find(
-              (i) => i.type === "text" && i.agentId === event.agentId
-            );
-            if (existingText) {
-              existingText.content = (existingText.content || "") + content;
-            } else {
-              items.push({
-                id: `text-${event.id}`,
-                type: "text",
-                timestamp: new Date(event.timestamp),
-                content,
-                agentId: event.agentId,
-              });
-            }
+        if (event.data.content) {
+          const content = event.data.content as string;
+          const agent = event.agentId || "";
+          const existing = currentText.get(agent);
+          if (existing) {
+            existing.content = (existing.content || "") + content;
+          } else {
+            const entry: ActivityItem = {
+              id: `text-${event.id}`,
+              type: "text",
+              timestamp: new Date(event.timestamp),
+              content,
+              agentId: event.agentId,
+            };
+            items.push(entry);
+            currentText.set(agent, entry);
           }
         }
         break;
 
-      // LEGACY: tool_call events
       case "tool_call": {
+        flushText(event.agentId);
         const callId = event.data.callId as string | undefined;
         const toolItem: ActivityItem = {
           id: event.id,
@@ -384,8 +317,8 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         break;
       }
 
-      // LEGACY: tool_result events
       case "tool_result": {
+        flushText(event.agentId);
         const callId = event.data.callId as string | undefined;
         const resultOutput = ((event.data.result || event.data.toolOutput) as string) || "";
         const isError = Boolean(event.data.isError);
@@ -417,6 +350,7 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
       }
 
       case "task_progress":
+        flushAllText();
         items.push({
           id: event.id,
           type: "progress",
@@ -426,52 +360,13 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         break;
 
       case "error":
+        flushAllText();
         items.push({
           id: event.id,
           type: "error",
           timestamp: new Date(event.timestamp),
           content: (event.data.error as string) || "An error occurred",
           status: "error",
-        });
-        break;
-
-      // NEW: Semantic task and plan events
-      case "task_created":
-        items.push({
-          id: event.id,
-          type: "task_created",
-          timestamp: new Date(event.timestamp),
-          task: event.data.task as TaskData,
-          agentId: event.agentId,
-        });
-        break;
-
-      case "task_updated":
-        items.push({
-          id: event.id,
-          type: "task_updated",
-          timestamp: new Date(event.timestamp),
-          taskId: event.data.taskId as string,
-          taskStatus: event.data.taskStatus as "pending" | "in_progress" | "completed",
-          agentId: event.agentId,
-        });
-        break;
-
-      case "plan_created":
-        items.push({
-          id: event.id,
-          type: "plan_created",
-          timestamp: new Date(event.timestamp),
-          agentId: event.agentId,
-        });
-        break;
-
-      case "plan_complete":
-        items.push({
-          id: event.id,
-          type: "plan_complete",
-          timestamp: new Date(event.timestamp),
-          agentId: event.agentId,
         });
         break;
     }
@@ -490,95 +385,12 @@ const TOOL_LABELS: Record<string, string> = {
   task: "Agent Task",
 };
 
-const ActivityEntry = memo(function ActivityEntry({ item, allTasks }: { item: ActivityItem; allTasks?: TaskData[] }) {
-  // Handle new AI SDK part format
-  if (item.type === "part" && item.part) {
-    // Check if this is a TaskCreate/TaskUpdate tool - render as task card
-    if (isDynamicToolPart(item.part) && isTaskTool(item.part.toolName)) {
-      const part = item.part;
-      if (part.toolName === "TaskCreate" && part.state === "output-available") {
-        // Parse the task from output
-        const taskData = typeof part.output === "string"
-          ? JSON.parse(part.output)
-          : part.output;
-        return <AgentTaskCard task={taskData} isStreaming={false} />;
-      }
-      if (part.toolName === "TaskUpdate" && part.state === "output-available") {
-        // Show compact status update
-        const input = part.input as Record<string, unknown> | undefined;
-        const taskId = input?.taskId as string;
-        const newStatus = input?.status as string;
-        return (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground py-1 pl-2 border-l-2 border-primary/30">
-            {newStatus === "completed" && <CheckCircle2Icon className="size-4 text-green-500" />}
-            {newStatus === "in_progress" && <PlayCircleIcon className="size-4 text-blue-500" />}
-            <span>Task #{taskId} → {newStatus}</span>
-          </div>
-        );
-      }
-    }
-    // Check if this is a Plan tool - render as plan marker
-    if (isDynamicToolPart(item.part) && isPlanTool(item.part.toolName)) {
-      const part = item.part;
-      if (part.toolName === "EnterPlanMode") {
-        return (
-          <div className="flex items-center gap-2 text-sm py-2 px-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-            <ListTodoIcon className="size-4 text-amber-500" />
-            <span className="font-medium text-amber-600">Agent entered plan mode</span>
-          </div>
-        );
-      }
-      if (part.toolName === "ExitPlanMode") {
-        return (
-          <div className="flex items-center gap-2 text-sm py-2 px-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-            <CheckCircle2Icon className="size-4 text-green-500" />
-            <span className="font-medium text-green-600">Plan ready for approval</span>
-          </div>
-        );
-      }
-    }
-    return <PartEntry part={item.part} />;
-  }
-
-  // Handle semantic task/plan events
-  if (item.type === "task_created" && item.task) {
-    return <AgentTaskCard task={item.task} isStreaming={false} />;
-  }
-
-  if (item.type === "task_updated") {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground py-1 pl-2 border-l-2 border-primary/30">
-        {item.taskStatus === "completed" && <CheckCircle2Icon className="size-4 text-green-500" />}
-        {item.taskStatus === "in_progress" && <PlayCircleIcon className="size-4 text-blue-500" />}
-        <span>Task #{item.taskId} → {item.taskStatus}</span>
-      </div>
-    );
-  }
-
-  if (item.type === "plan_created") {
-    return (
-      <div className="flex items-center gap-2 text-sm py-2 px-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-        <ListTodoIcon className="size-4 text-amber-500" />
-        <span className="font-medium text-amber-600">Agent entered plan mode</span>
-      </div>
-    );
-  }
-
-  if (item.type === "plan_complete") {
-    return (
-      <div className="flex items-center gap-2 text-sm py-2 px-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-        <CheckCircle2Icon className="size-4 text-green-500" />
-        <span className="font-medium text-green-600">Plan ready for approval</span>
-      </div>
-    );
-  }
-
-  // Handle legacy format
+const ActivityEntry = memo(function ActivityEntry({ item }: { item: ActivityItem }) {
   switch (item.type) {
     case "thinking":
       return (
         <div className="pl-2 border-l-2 border-amber-500/50">
-          <Reasoning duration={undefined} defaultOpen={true}>
+          <Reasoning duration={undefined} defaultOpen={false}>
             <ReasoningTrigger />
             <ReasoningContent>{item.content || ""}</ReasoningContent>
           </Reasoning>
@@ -649,81 +461,6 @@ const ActivityEntry = memo(function ActivityEntry({ item, allTasks }: { item: Ac
     default:
       return null;
   }
-});
-
-/**
- * Render AI SDK UI Part directly
- */
-const PartEntry = memo(function PartEntry({ part }: { part: AgentUIPart }) {
-  if (isTextPart(part)) {
-    return (
-      <div className="prose prose-sm dark:prose-invert max-w-none">
-        <Markdown>{part.text}</Markdown>
-      </div>
-    );
-  }
-
-  if (isReasoningPart(part)) {
-    return (
-      <div className="pl-2 border-l-2 border-amber-500/50">
-        <Reasoning duration={undefined} defaultOpen={true}>
-          <ReasoningTrigger />
-          <ReasoningContent>{part.text}</ReasoningContent>
-        </Reasoning>
-      </div>
-    );
-  }
-
-  if (isDynamicToolPart(part)) {
-    const normalizedName = part.toolName.toLowerCase();
-    const label = TOOL_LABELS[normalizedName] || part.toolName;
-    const hasOutput = part.state === "output-available" || part.state === "output-error";
-
-    // Get output content based on state
-    const getOutputContent = (): string | undefined => {
-      if (part.state === "output-available") {
-        return typeof part.output === "string" ? part.output : JSON.stringify(part.output, null, 2);
-      }
-      if (part.state === "output-error") {
-        return part.errorText;
-      }
-      return undefined;
-    };
-
-    const outputContent = getOutputContent();
-    const parsedOutput = outputContent ? parseToolOutput(outputContent) : null;
-
-    return (
-      <Tool defaultOpen={part.state === "input-available" || part.state === "input-streaming"}>
-        <ToolHeader
-          title={label || "Tool"}
-          type="dynamic-tool"
-          state={part.state}
-          toolName={part.toolName}
-        />
-        <ToolContent>
-          {part.input !== undefined && part.input !== null && (
-            <ToolInput input={part.input as Record<string, unknown>} />
-          )}
-          {parsedOutput && (
-            <>
-              <ToolOutput
-                output={(part.state === "output-available" ? truncateOutput(parsedOutput.main) : null) as string | null}
-                errorText={(part.state === "output-error" ? truncateOutput(parsedOutput.main) : undefined) as string | undefined}
-              />
-              {parsedOutput.systemReminders.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-border/50">
-                  <SystemReminderDisplay reminders={parsedOutput.systemReminders} />
-                </div>
-              )}
-            </>
-          )}
-        </ToolContent>
-      </Tool>
-    );
-  }
-
-  return null;
 });
 
 const StreamingEntry = memo(function StreamingEntry({ content }: { content: string }) {
@@ -809,8 +546,12 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
   accumulatedText,
   isStreaming,
   isConnected,
-  onPlanApprove,
-  onPlanReject,
+  workflowId,
+  isWorkflowActive,
+  isAwaitingApproval,
+  workflow,
+  statusMessage,
+  progress,
   className,
 }: AgentDetailPanelProps) {
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -845,6 +586,20 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
               </span>
             )}
           </TabButton>
+
+          {isWorkflowActive && (
+            <TabButton
+              isActive={activeTab === "progress"}
+              onClick={() => onTabChange("progress")}
+            >
+              <span>Progress</span>
+              {progress !== null && progress !== undefined && (
+                <span className="ml-1.5 text-xs text-muted-foreground">
+                  {progress}%
+                </span>
+              )}
+            </TabButton>
+          )}
         </div>
 
         <button
@@ -873,9 +628,64 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
             accumulatedText={accumulatedText}
             isStreaming={isStreaming}
             isConnected={isConnected}
-            onPlanApprove={onPlanApprove}
-            onPlanReject={onPlanReject}
           />
+        )}
+        {activeTab === "progress" && (
+          <div className="h-full overflow-y-auto">
+            <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+              {/* Phase Progress Indicator */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <AgentPhaseIndicator
+                  events={events}
+                  workflowId={workflowId}
+                />
+              </div>
+
+              {/* Status Message */}
+              {statusMessage && (
+                <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/30 border border-border">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0" />
+                  <p className="text-sm text-muted-foreground">{statusMessage}</p>
+                </div>
+              )}
+
+              {/* Plan Approval Section (when awaiting approval) */}
+              {isAwaitingApproval && (
+                <div className="rounded-lg overflow-hidden border border-amber-500/30">
+                  <PlanApprovalSection
+                    workflowId={workflowId ?? null}
+                    planTitle={workflow?.plan?.title}
+                    planSummary={workflow?.plan?.summary}
+                    planSteps={workflow?.plan?.tasks?.map((t) => ({
+                      id: t.id,
+                      title: t.subject || t.title || "",
+                      description: t.description,
+                    }))}
+                  />
+                </div>
+              )}
+
+              {/* Workflow Info */}
+              {workflow && (
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Workflow ID</span>
+                    <span className="font-mono text-xs">{workflowId}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-muted-foreground">
+                    <span>Status</span>
+                    <span className="capitalize">{workflow.status?.toLowerCase().replace(/_/g, " ")}</span>
+                  </div>
+                  {progress !== null && progress !== undefined && (
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>Progress</span>
+                      <span>{progress}%</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

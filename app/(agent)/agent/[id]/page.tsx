@@ -74,7 +74,7 @@ async function AgentSessionPage({ params }: AgentSessionPageProps) {
   if (hasWorkflow) {
     return (
       <WorkflowExecutionProvider
-        workflowId={agentSession.workflowId!} // Use actual workflow ID - events are published keyed by workflow ID
+        workflowId={agentSession.workflowId!} // Use actual orchestrator workflow ID (e.g. "planner-xxx")
         initialTaskPrompt={taskPromptText}
       >
         <div className="flex h-dvh flex-col">

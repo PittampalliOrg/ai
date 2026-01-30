@@ -1,5 +1,5 @@
 import NextAuth, { type DefaultSession } from "next-auth";
-import type { DefaultJWT, JWT } from "next-auth/jwt";
+import type { JWT } from "next-auth/jwt";
 import GitHub from "next-auth/providers/github";
 import { isDevelopmentEnvironment } from "@/lib/constants";
 import { findOrCreateGitHubUser } from "@/lib/db/queries";
@@ -27,7 +27,7 @@ declare module "next-auth" {
 }
 
 declare module "next-auth/jwt" {
-  interface JWT extends DefaultJWT {
+  interface JWT {
     id: string;
     type: UserType;
     accessToken?: string;

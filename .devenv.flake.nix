@@ -15,7 +15,7 @@
   container_name = null;
   active_profiles = [
   ];
-  hostname = "thinkpad";
+  hostname = "ryzen";
   username = "vpittamp";
   git_root = "/home/vpittamp/repos/PittampalliOrg/ai/main";
   secretspec = null;
@@ -52,7 +52,7 @@
   container_name = null;
   active_profiles = [
   ];
-  hostname = "thinkpad";
+  hostname = "ryzen";
   username = "vpittamp";
   git_root = "/home/vpittamp/repos/PittampalliOrg/ai/main";
   secretspec = null;

@@ -2,15 +2,14 @@
  * Workflow Start API
  *
  * POST /api/workflows/start
- * Proxies workflow start requests to the planner-agent service using Dapr service invocation.
+ * Proxies workflow start requests to the planner-orchestrator service using Dapr service invocation.
  *
- * This endpoint acts as a thin proxy to planner-agent's /api/workflows endpoint.
- * The workflow runs entirely in planner-agent, which handles:
- * - Repository cloning (durable)
- * - Codebase exploration
- * - Plan creation
- * - Approval gate (wait_for_external_event)
- * - Plan execution
+ * This endpoint acts as a thin proxy to planner-orchestrator's /api/workflows endpoint.
+ * The orchestrator coordinates planning and execution across separate agent containers:
+ * - Planning phase (planner-agent-plan)
+ * - Task persistence (Dapr statestore)
+ * - Human approval gate (wait_for_external_event)
+ * - Execution phase (planner-agent-exec)
  *
  * Benefits of Dapr service invocation:
  * - Automatic mTLS encryption between services
@@ -22,9 +21,9 @@
 import { NextResponse } from "next/server";
 import { invokeService } from "@/lib/dapr/client";
 
-// Planner agent Dapr app ID
+// Planner orchestrator Dapr app ID
 // Use namespace-qualified app ID for cross-namespace Dapr invocation
-const PLANNER_AGENT_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-agent.planner-agent";
+const PLANNER_ORCHESTRATOR_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-orchestrator.planner-agent";
 
 export const maxDuration = 60; // Allow up to 60 seconds for workflow scheduling
 
@@ -78,7 +77,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    console.log(`[Workflow Start] Invoking ${PLANNER_AGENT_APP_ID} via Dapr service invocation`);
+    console.log(`[Workflow Start] Invoking ${PLANNER_ORCHESTRATOR_APP_ID} via Dapr service invocation`);
     console.log(`[Workflow Start] Task: ${task.substring(0, 100)}...`);
     if (sessionId) {
       console.log(`[Workflow Start] Session ID: ${sessionId}`);
@@ -87,27 +86,22 @@ export async function POST(request: Request): Promise<Response> {
       console.log(`[Workflow Start] Target Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`);
     }
 
-    // Call planner-agent's workflow API via Dapr service invocation
-    // The workflow handles clone internally for durability
-    const response = await invokeService<{ workflowId: string; status: string; error?: string }>({
-      appId: PLANNER_AGENT_APP_ID,
+    // Call planner-orchestrator's workflow API via Dapr service invocation
+    // Map: UI sends {task}, orchestrator expects {feature_request, cwd}
+    const response = await invokeService<{ workflow_id: string; status: string; error?: string }>({
+      appId: PLANNER_ORCHESTRATOR_APP_ID,
       method: "POST",
       path: "/api/workflows",
       body: {
-        prompt: task,
-        sessionId,
-        options: {
-          autoApprove: options?.autoApprove ?? false,
-          workingDirectory: options?.workingDirectory,
-          targetRepository,
-        },
+        feature_request: task,
+        cwd: options?.workingDirectory || "/app/workspace",
       },
       timeout: 60000, // Allow up to 60 seconds for workflow scheduling
     });
 
     if (!response.ok) {
       const errorMsg = response.data?.error || `Workflow service error: ${response.status}`;
-      console.error(`[Workflow Start] Planner-agent returned ${response.status}: ${errorMsg}`);
+      console.error(`[Workflow Start] Orchestrator returned ${response.status}: ${errorMsg}`);
       return NextResponse.json(
         {
           success: false,
@@ -117,14 +111,17 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    // Map: orchestrator returns {workflow_id}, UI expects {workflowId}
+    const workflowId = response.data?.workflow_id;
+
     console.log(
-      `[Workflow Start] Workflow started successfully: ${response.data?.workflowId}`
+      `[Workflow Start] Workflow started successfully: ${workflowId}`
     );
 
     return NextResponse.json(
       {
         success: true,
-        workflowId: response.data?.workflowId,
+        workflowId,
         status: response.data?.status,
       } satisfies StartWorkflowResponse,
       { status: 201 }
