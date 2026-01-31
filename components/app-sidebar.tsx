@@ -17,6 +17,7 @@ import {
   ChevronRight,
   LayoutDashboard,
   Boxes,
+  Settings,
 } from "lucide-react";
 import {
   getChatHistoryPaginationKey,
@@ -62,6 +63,7 @@ const platformLinks = [
   { href: "/call-graph", label: "Call Graph", icon: GitBranch },
   { href: "/pub-sub", label: "Pub/Sub", icon: Radio },
   { href: "/kv-store", label: "KV Store", icon: Database },
+  { href: "/configuration", label: "Configuration", icon: Settings },
 ];
 
 export function AppSidebar({ user }: { user: User | undefined }) {

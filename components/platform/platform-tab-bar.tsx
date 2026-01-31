@@ -9,6 +9,7 @@ import {
   Radio,
   Database,
   Boxes,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SidebarToggle } from "@/components/sidebar-toggle";
@@ -20,6 +21,7 @@ const platformTabs = [
   { href: "/call-graph", label: "Call Graph", icon: GitBranch },
   { href: "/pub-sub", label: "Pub/Sub", icon: Radio },
   { href: "/kv-store", label: "KV Store", icon: Database },
+  { href: "/configuration", label: "Configuration", icon: Settings },
 ];
 
 interface PlatformTabBarProps {
