@@ -7,12 +7,73 @@
  */
 
 import { NextResponse } from "next/server";
-import { getAllConfiguration, isAvailable } from "@/lib/dapr/client";
+import { getConfiguration, isAvailable } from "@/lib/dapr/client";
 import {
   getConfig,
   isDaprEnabled,
   isInitialized,
 } from "@/lib/dapr/config-provider";
+
+// Configuration keys to fetch from Dapr Configuration store
+// Must specify keys explicitly - Azure App Config doesn't support "get all"
+const CONFIG_KEYS = [
+  // Feature flags
+  "WORKFLOW_PATTERNS_ENABLED",
+  "USE_DAPR_SERVICE_INVOCATION",
+  "DAPR_WORKFLOW_ENABLED",
+  "USE_DAPR_STATE_STORE",
+  "USE_BUILT_IN_AGENTS",
+  // Sandbox settings
+  "SANDBOX_MODE",
+  "SANDBOX_NAMESPACE",
+  "SANDBOX_TEMPLATE",
+  "SANDBOX_TIMEOUT",
+  // Service URLs
+  "WORKFLOW_SERVICE_URL",
+  "PLANNER_SERVICE_URL",
+  "PLANNER_AGENT_APP_ID",
+  // Gateway URLs
+  "KGATEWAY_OPENAI_URL",
+  "KGATEWAY_ANTHROPIC_URL",
+  "KGATEWAY_GOOGLE_URL",
+  // Observability
+  "OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OTEL_EXPORTER_OTLP_PROTOCOL",
+  "OTEL_SERVICE_NAME",
+  "OTEL_RESOURCE_ATTRIBUTES",
+  "OTEL_PROPAGATORS",
+  "OTEL_BSP_SCHEDULE_DELAY",
+  "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+  // Dapr component names
+  "DAPR_STATE_STORE",
+  "DAPR_PUBSUB",
+  "PUBSUB_NAME",
+  "AGENT_REGISTRY_STORE",
+  "DAPR_WORKFLOW_STATE_STORE",
+  // Kubernetes
+  "APP_NAMESPACE",
+  // Storage
+  "UPLOAD_DIR",
+  "WORKING_DIRECTORY",
+  // Auth
+  "AUTH_TRUST_HOST",
+  "AUTH_URL",
+  // AI Models
+  "CLAUDE_MODEL",
+  "CLAUDE_CODE_PATH",
+  // Execution
+  "EXECUTION_TIMEOUT",
+  // Redis
+  "REDIS_HOST",
+  "REDIS_PORT",
+  "WORKFLOW_REDIS_HOST",
+  "WORKFLOW_REDIS_PORT",
+  "WORKFLOW_STATE_KEY",
+  // Feature flags service
+  "FLIPT_URL",
+  "FLIPT_NAMESPACE",
+  "FLIPT_ENABLED",
+];
 
 // Category patterns for auto-categorization by prefix
 const CATEGORY_PATTERNS: [string, RegExp][] = [
@@ -98,6 +159,10 @@ export async function GET() {
   const cachedInitialized = isInitialized();
   const cachedDaprEnabled = isDaprEnabled();
 
+  // Track errors for debug info
+  let configStoreError: string | undefined;
+  let fliptError: string | undefined;
+
   const response: ConfigurationResponse = {
     sources: {
       azureAppConfig: {
@@ -123,12 +188,15 @@ export async function GET() {
     config: [],
     featureFlags: [],
   };
+
   if (daprAvailable) {
     try {
-      const allConfig = await getAllConfiguration(CONFIG_STORE);
+      // Must specify keys explicitly - Azure App Config doesn't support "get all"
+      const configResult = await getConfiguration(CONFIG_STORE, [...CONFIG_KEYS]);
+      console.log("[Configuration API] getConfiguration returned:", Object.keys(configResult).length, "keys");
       response.sources.azureAppConfig.available = true;
 
-      for (const [key, item] of Object.entries(allConfig)) {
+      for (const [key, item] of Object.entries(configResult)) {
         if (item?.value !== undefined) {
           response.config.push({
             key,
@@ -141,11 +209,8 @@ export async function GET() {
 
       response.sources.azureAppConfig.itemCount = response.config.length;
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error("[Configuration API] Failed to fetch from Dapr:", errorMsg);
-      if (response.debug) {
-        response.debug.configStoreError = errorMsg;
-      }
+      configStoreError = error instanceof Error ? error.message : String(error);
+      console.error("[Configuration API] Failed to fetch from Dapr:", configStoreError);
       // Continue with env vars only
     }
   }
@@ -203,8 +268,8 @@ export async function GET() {
     cachedInitialized,
     cachedDaprEnabled,
     realtimeDaprCheck: daprAvailable,
-    configStoreError: undefined as string | undefined,
-    fliptError: undefined as string | undefined,
+    configStoreError,
+    fliptError,
   };
 
   // Fetch feature flags from Flipt
@@ -251,11 +316,8 @@ export async function GET() {
       response.sources.flipt.flagCount = response.featureFlags.length;
     }
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.error("[Configuration API] Failed to fetch from Flipt:", errorMsg);
-    if (response.debug) {
-      response.debug.fliptError = errorMsg;
-    }
+    fliptError = error instanceof Error ? error.message : String(error);
+    console.error("[Configuration API] Failed to fetch from Flipt:", fliptError);
     // Continue without Flipt data
   }
 
