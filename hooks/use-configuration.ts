@@ -50,6 +50,8 @@ export interface ConfigurationDebug {
   cachedInitialized: boolean;
   cachedDaprEnabled: boolean;
   realtimeDaprCheck: boolean;
+  configStoreError?: string;
+  fliptError?: string;
 }
 
 export interface ConfigurationResponse {

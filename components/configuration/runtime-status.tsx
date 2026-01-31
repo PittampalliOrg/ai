@@ -93,6 +93,12 @@ export function RuntimeStatus({ sources, debug }: RuntimeStatusProps) {
             <div>Realtime Dapr Check: {debug.realtimeDaprCheck ? "true" : "false"}</div>
             <div>Cached Initialized: {debug.cachedInitialized ? "true" : "false"}</div>
             <div>Cached Dapr Enabled: {debug.cachedDaprEnabled ? "true" : "false"}</div>
+            {debug.configStoreError && (
+              <div className="text-red-500">Config Store Error: {debug.configStoreError}</div>
+            )}
+            {debug.fliptError && (
+              <div className="text-red-500">Flipt Error: {debug.fliptError}</div>
+            )}
           </div>
         </div>
       )}

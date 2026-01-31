@@ -139,7 +139,11 @@ export async function GET() {
 
       response.sources.azureAppConfig.itemCount = response.config.length;
     } catch (error) {
-      console.error("[Configuration API] Failed to fetch from Dapr:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error("[Configuration API] Failed to fetch from Dapr:", errorMsg);
+      if (response.debug) {
+        response.debug.configStoreError = errorMsg;
+      }
       // Continue with env vars only
     }
   }
@@ -197,6 +201,8 @@ export async function GET() {
     cachedInitialized,
     cachedDaprEnabled,
     realtimeDaprCheck: daprAvailable,
+    configStoreError: undefined as string | undefined,
+    fliptError: undefined as string | undefined,
   };
 
   // Fetch feature flags from Flipt
@@ -243,7 +249,11 @@ export async function GET() {
       response.sources.flipt.flagCount = response.featureFlags.length;
     }
   } catch (error) {
-    console.error("[Configuration API] Failed to fetch from Flipt:", error);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error("[Configuration API] Failed to fetch from Flipt:", errorMsg);
+    if (response.debug) {
+      response.debug.fliptError = errorMsg;
+    }
     // Continue without Flipt data
   }
 
