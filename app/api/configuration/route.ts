@@ -83,6 +83,8 @@ interface ConfigurationResponse {
     cachedInitialized: boolean;
     cachedDaprEnabled: boolean;
     realtimeDaprCheck: boolean;
+    configStoreError?: string;
+    fliptError?: string;
   };
 }
 
