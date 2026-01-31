@@ -1,10 +1,11 @@
 "use client";
 
 import { CheckCircle, XCircle, Circle } from "lucide-react";
-import type { ConfigurationSources } from "@/hooks/use-configuration";
+import type { ConfigurationSources, ConfigurationDebug } from "@/hooks/use-configuration";
 
 interface RuntimeStatusProps {
   sources: ConfigurationSources | undefined;
+  debug?: ConfigurationDebug;
 }
 
 function StatusIndicator({
@@ -33,7 +34,7 @@ function StatusIndicator({
   );
 }
 
-export function RuntimeStatus({ sources }: RuntimeStatusProps) {
+export function RuntimeStatus({ sources, debug }: RuntimeStatusProps) {
   if (!sources) {
     return (
       <div className="flex items-center gap-2 text-muted-foreground">
@@ -82,6 +83,19 @@ export function RuntimeStatus({ sources }: RuntimeStatusProps) {
             : "Not connected"
         }
       />
+
+      {/* Debug info */}
+      {debug && (
+        <div className="mt-4 pt-4 border-t">
+          <p className="text-xs text-muted-foreground mb-2 font-medium">Debug Info</p>
+          <div className="text-xs text-muted-foreground space-y-1 font-mono">
+            <div>Dapr URL: http://{debug.daprHost}:{debug.daprPort}</div>
+            <div>Realtime Dapr Check: {debug.realtimeDaprCheck ? "true" : "false"}</div>
+            <div>Cached Initialized: {debug.cachedInitialized ? "true" : "false"}</div>
+            <div>Cached Dapr Enabled: {debug.cachedDaprEnabled ? "true" : "false"}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

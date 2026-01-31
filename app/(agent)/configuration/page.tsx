@@ -30,6 +30,7 @@ export default function ConfigurationPage() {
     totalCount,
     filteredCount,
     hasFilters,
+    debug,
   } = useConfiguration({ refreshInterval: 30000 });
 
   // Build Flipt URL from sources
@@ -130,7 +131,7 @@ export default function ConfigurationPage() {
                 description="Configuration provider and service connectivity status"
                 defaultExpanded={true}
               >
-                <RuntimeStatus sources={sources} />
+                <RuntimeStatus sources={sources} debug={debug} />
               </ConfigSection>
             </>
           )}

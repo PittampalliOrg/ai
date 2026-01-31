@@ -44,10 +44,19 @@ export interface ConfigurationSources {
   };
 }
 
+export interface ConfigurationDebug {
+  daprHost: string;
+  daprPort: string;
+  cachedInitialized: boolean;
+  cachedDaprEnabled: boolean;
+  realtimeDaprCheck: boolean;
+}
+
 export interface ConfigurationResponse {
   sources: ConfigurationSources;
   config: ConfigItem[];
   featureFlags: FeatureFlag[];
+  debug?: ConfigurationDebug;
 }
 
 // ============================================================================
@@ -161,5 +170,8 @@ export function useConfiguration(options: UseConfigurationOptions = {}) {
     hasFilters: searchTerm !== "" || categoryFilter !== null,
     totalCount: data?.config?.length || 0,
     filteredCount: filteredConfig.length,
+
+    // Debug info
+    debug: data?.debug,
   };
 }

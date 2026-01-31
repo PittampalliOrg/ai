@@ -77,11 +77,25 @@ interface ConfigurationResponse {
   };
   config: ConfigItem[];
   featureFlags: FeatureFlag[];
+  debug?: {
+    daprHost: string;
+    daprPort: string;
+    cachedInitialized: boolean;
+    cachedDaprEnabled: boolean;
+    realtimeDaprCheck: boolean;
+  };
 }
 
 const CONFIG_STORE = process.env.DAPR_CONFIG_STORE || "azureappconfig";
 
 export async function GET() {
+  // Check Dapr availability in real-time (don't rely on cached module state)
+  const daprAvailable = await isAvailable();
+
+  // Use real-time check for status display, but also show cached state for debugging
+  const cachedInitialized = isInitialized();
+  const cachedDaprEnabled = isDaprEnabled();
+
   const response: ConfigurationResponse = {
     sources: {
       azureAppConfig: {
@@ -98,17 +112,15 @@ export async function GET() {
         flagCount: 0,
       },
       runtime: {
-        initialized: isInitialized(),
-        daprEnabled: isDaprEnabled(),
-        configSource: isDaprEnabled() ? "dapr" : "env",
+        // Use real-time Dapr check, not cached state
+        initialized: cachedInitialized || daprAvailable,
+        daprEnabled: daprAvailable,
+        configSource: daprAvailable ? "dapr" : "env",
       },
     },
     config: [],
     featureFlags: [],
   };
-
-  // Fetch configuration from Dapr (Azure App Config)
-  const daprAvailable = await isAvailable();
   if (daprAvailable) {
     try {
       const allConfig = await getAllConfiguration(CONFIG_STORE);
@@ -177,6 +189,15 @@ export async function GET() {
     if (catCompare !== 0) return catCompare;
     return a.key.localeCompare(b.key);
   });
+
+  // Add debug info
+  response.debug = {
+    daprHost: process.env.DAPR_HOST || "localhost",
+    daprPort: process.env.DAPR_HTTP_PORT || "3500",
+    cachedInitialized,
+    cachedDaprEnabled,
+    realtimeDaprCheck: daprAvailable,
+  };
 
   // Fetch feature flags from Flipt
   const fliptUrl = getConfig(
