@@ -270,13 +270,105 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   // Try workflow-patterns
   try {
-    // Initialize runtime if needed
-    if (!isWorkflowPatternsRuntimeInitialized()) {
-      await initializeWorkflowPatternsRuntime();
+    // First check if the workflow exists in the index (works for planner-dapr-agent workflows)
+    // This avoids needing to initialize the runtime for external agent workflows
+    const indexEntry = await getWorkflowFromIndex(instanceId);
+
+    // If found in index and has output (completed workflow), return it directly
+    // This handles planner-dapr-agent workflows that don't need the runtime
+    if (indexEntry && indexEntry.output) {
+      console.log(`[Workflow Detail] Found ${instanceId} in index with output, returning directly`);
+
+      // Check for planner-dapr-agent tasks in the index entry output
+      const indexOutput = indexEntry.output as Record<string, unknown> | undefined;
+      let plan: { id: string; title: string; summary: string; tasks: Array<{ id: string; title: string; description: string; status: "pending" | "completed" }> } | undefined;
+      let execution: { currentTaskIndex: number; completedTasks: string[]; failedTasks: string[]; skippedTasks: string[]; logs: ExecutionLog[] } | undefined;
+
+      if (indexOutput?.tasks && Array.isArray(indexOutput.tasks)) {
+        const agentTasks = indexOutput.tasks as Array<{ id: string; subject: string; description: string; status: string; blockedBy: string[]; blocks: string[] }>;
+        const inputMessage = (indexOutput.message as string) || (indexEntry.input as Record<string, unknown>)?.message as string;
+
+        plan = {
+          id: instanceId,
+          title: inputMessage || `${indexEntry.workflowType} Workflow`,
+          summary: `${agentTasks.length} implementation tasks with dependencies`,
+          tasks: agentTasks.map(t => ({
+            id: t.id,
+            title: t.subject,
+            description: t.description,
+            status: indexEntry.status === "completed" ? "completed" as const : "pending" as const,
+          })),
+        };
+
+        // Build execution logs from tasks
+        const startTime = new Date(indexEntry.createdAt).getTime();
+        const endTime = new Date(indexEntry.updatedAt).getTime();
+        const taskDuration = (endTime - startTime) / agentTasks.length;
+
+        const executionLogs: ExecutionLog[] = [];
+        agentTasks.forEach((task, i) => {
+          const taskStart = new Date(startTime + i * taskDuration).toISOString();
+          const taskEnd = new Date(startTime + (i + 1) * taskDuration).toISOString();
+
+          executionLogs.push({
+            timestamp: taskStart,
+            taskId: task.id,
+            event: "started",
+            message: `Creating task: ${task.subject}`,
+          });
+
+          if (indexEntry.status === "completed") {
+            executionLogs.push({
+              timestamp: taskEnd,
+              taskId: task.id,
+              event: "completed",
+              message: `Created task: ${task.subject}`,
+              details: { blockedBy: task.blockedBy, blocks: task.blocks },
+            });
+          }
+        });
+
+        execution = {
+          currentTaskIndex: executionLogs.length,
+          completedTasks: executionLogs.filter(l => l.event === "completed").map(l => l.taskId),
+          failedTasks: [],
+          skippedTasks: [],
+          logs: executionLogs,
+        };
+      }
+
+      // Return index data as a workflow entry
+      return NextResponse.json({
+        workflow: {
+          id: indexEntry.instanceId,
+          status: indexEntry.status.toUpperCase(),
+          createdAt: indexEntry.createdAt,
+          updatedAt: indexEntry.updatedAt,
+          request: indexEntry.input ? {
+            prompt: JSON.stringify(indexEntry.input),
+            submittedAt: indexEntry.createdAt,
+          } : undefined,
+          plan,
+          execution,
+          workflowType: indexEntry.workflowType,
+          source: "patterns",
+          appId: "workflow-patterns",
+        } as WorkflowEntry & { workflowType?: string; source?: string; appId?: string },
+      });
     }
 
-    // Get workflow state from Dapr
-    const state = await getWorkflowPatternState(instanceId);
+    // For workflows not in the index or without output, try to initialize runtime
+    let state = null;
+    try {
+      if (!isWorkflowPatternsRuntimeInitialized()) {
+        await initializeWorkflowPatternsRuntime();
+      }
+      // Get workflow state from Dapr
+      state = await getWorkflowPatternState(instanceId);
+    } catch (runtimeError) {
+      console.log(`[Workflow Detail] Runtime initialization failed, checking index only:`, runtimeError);
+      // Continue without runtime - we'll check the index below
+    }
 
     // Sync status to index if we have state
     if (state) {
@@ -292,28 +384,88 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     if (!state) {
-      // Also check the index for metadata
-      const indexEntry = await getWorkflowFromIndex(instanceId);
-      if (!indexEntry) {
+      // Check index again in case it was updated
+      const refreshedIndexEntry = indexEntry || await getWorkflowFromIndex(instanceId);
+      if (!refreshedIndexEntry) {
         return NextResponse.json(
           { error: `Workflow with ID "${instanceId}" not found` },
           { status: 404 }
         );
       }
 
+      // Check for planner-dapr-agent tasks in the index entry output
+      const indexOutput2 = refreshedIndexEntry.output as Record<string, unknown> | undefined;
+      let plan: { id: string; title: string; summary: string; tasks: Array<{ id: string; title: string; description: string; status: "pending" | "completed" }> } | undefined;
+      let execution: { currentTaskIndex: number; completedTasks: string[]; failedTasks: string[]; skippedTasks: string[]; logs: ExecutionLog[] } | undefined;
+
+      if (indexOutput2?.tasks && Array.isArray(indexOutput2.tasks)) {
+        const agentTasks = indexOutput2.tasks as Array<{ id: string; subject: string; description: string; status: string; blockedBy: string[]; blocks: string[] }>;
+        const inputMessage = (indexOutput2.message as string) || (refreshedIndexEntry.input as Record<string, unknown>)?.message as string;
+
+        plan = {
+          id: instanceId,
+          title: inputMessage || `${refreshedIndexEntry.workflowType} Workflow`,
+          summary: `${agentTasks.length} implementation tasks with dependencies`,
+          tasks: agentTasks.map(t => ({
+            id: t.id,
+            title: t.subject,
+            description: t.description,
+            status: refreshedIndexEntry.status === "completed" ? "completed" as const : "pending" as const,
+          })),
+        };
+
+        // Build execution logs from tasks
+        const startTime = new Date(refreshedIndexEntry.createdAt).getTime();
+        const endTime = new Date(refreshedIndexEntry.updatedAt).getTime();
+        const taskDuration = (endTime - startTime) / agentTasks.length;
+
+        const executionLogs: ExecutionLog[] = [];
+        agentTasks.forEach((task, i) => {
+          const taskStart = new Date(startTime + i * taskDuration).toISOString();
+          const taskEnd = new Date(startTime + (i + 1) * taskDuration).toISOString();
+
+          executionLogs.push({
+            timestamp: taskStart,
+            taskId: task.id,
+            event: "started",
+            message: `Creating task: ${task.subject}`,
+          });
+
+          if (refreshedIndexEntry.status === "completed") {
+            executionLogs.push({
+              timestamp: taskEnd,
+              taskId: task.id,
+              event: "completed",
+              message: `Created task: ${task.subject}`,
+              details: { blockedBy: task.blockedBy, blocks: task.blocks },
+            });
+          }
+        });
+
+        execution = {
+          currentTaskIndex: executionLogs.length,
+          completedTasks: executionLogs.filter(l => l.event === "completed").map(l => l.taskId),
+          failedTasks: [],
+          skippedTasks: [],
+          logs: executionLogs,
+        };
+      }
+
       // Return index data as a workflow entry
       return NextResponse.json({
         workflow: {
-          id: indexEntry.instanceId,
-          status: indexEntry.status.toUpperCase(),
-          createdAt: indexEntry.createdAt,
-          updatedAt: indexEntry.updatedAt,
-          request: indexEntry.input ? {
-            prompt: JSON.stringify(indexEntry.input),
-            submittedAt: indexEntry.createdAt,
+          id: refreshedIndexEntry.instanceId,
+          status: refreshedIndexEntry.status.toUpperCase(),
+          createdAt: refreshedIndexEntry.createdAt,
+          updatedAt: refreshedIndexEntry.updatedAt,
+          request: refreshedIndexEntry.input ? {
+            prompt: JSON.stringify(refreshedIndexEntry.input),
+            submittedAt: refreshedIndexEntry.createdAt,
           } : undefined,
+          plan,
+          execution,
           // Pattern-specific fields
-          workflowType: indexEntry.workflowType,
+          workflowType: refreshedIndexEntry.workflowType,
           source: "patterns",
         } as WorkflowEntry & { workflowType?: string; source?: string },
       });
@@ -348,12 +500,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       customStatus = state.serializedCustomStatus;
     }
 
-    // Get index entry for additional metadata
-    const indexEntry = await getWorkflowFromIndex(instanceId);
+    // Get index entry for additional metadata (reuse if already fetched)
+    const stateIndexEntry = indexEntry || await getWorkflowFromIndex(instanceId);
+    console.log(`[Workflow Detail] indexEntry for ${instanceId}:`,
+      stateIndexEntry ? {
+        workflowType: stateIndexEntry.workflowType,
+        hasOutput: !!stateIndexEntry.output,
+        outputKeys: stateIndexEntry.output ? Object.keys(stateIndexEntry.output) : [],
+        tasksCount: (stateIndexEntry.output as Record<string, unknown>)?.tasks ?
+          ((stateIndexEntry.output as Record<string, unknown>).tasks as unknown[]).length : 0
+      } : 'null');
 
     // Build execution logs based on pattern type
     const executionLogs = buildPatternExecutionLogs(
-      indexEntry?.workflowType || "unknown",
+      stateIndexEntry?.workflowType || "unknown",
       state.runtimeStatus,
       state.createdAt.toISOString(),
       state.lastUpdatedAt.toISOString(),
@@ -362,9 +522,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     );
 
     // Extract plan data from output if available
-    let planTitle = indexEntry?.workflowType ? `${indexEntry.workflowType} Pattern` : "Workflow Pattern";
+    let planTitle = stateIndexEntry?.workflowType ? `${stateIndexEntry.workflowType} Pattern` : "Workflow Pattern";
     let planSummary = typeof customStatus === "string" ? customStatus : "Pattern workflow execution";
     let planSteps: Array<{ title: string; description: string }> = [];
+    let agentTasks: Array<{ id: string; subject: string; description: string; status: string; blockedBy: string[]; blocks: string[] }> = [];
+
+    // Check for planner-dapr-agent tasks in the index entry output
+    const stateIndexOutput = stateIndexEntry?.output as Record<string, unknown> | undefined;
+    if (stateIndexOutput?.tasks && Array.isArray(stateIndexOutput.tasks)) {
+      agentTasks = stateIndexOutput.tasks as typeof agentTasks;
+      const inputMessage = (stateIndexOutput.message as string) || (stateIndexEntry?.input as Record<string, unknown>)?.message as string;
+      if (inputMessage) {
+        planTitle = inputMessage;
+      }
+      planSummary = `${agentTasks.length} implementation tasks with dependencies`;
+    }
 
     // Try to get actual plan data from workflow output
     if (output && typeof output === "object") {
@@ -396,6 +568,57 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Build task list and execution logs from agent tasks if available
+    let planTasks: Array<{ id: string; title: string; description: string; status: "pending" | "in_progress" | "completed" }>;
+    let finalExecutionLogs: ExecutionLog[];
+
+    if (agentTasks.length > 0) {
+      // Use actual tasks from planner-dapr-agent
+      planTasks = agentTasks.map(t => ({
+        id: t.id,
+        title: t.subject,
+        description: t.description,
+        status: state.runtimeStatus === "COMPLETED" ? "completed" as const : "pending" as const,
+      }));
+
+      // Build execution logs from tasks
+      const startTime = state.createdAt.getTime();
+      const endTime = state.lastUpdatedAt.getTime();
+      const taskDuration = (endTime - startTime) / agentTasks.length;
+
+      finalExecutionLogs = [];
+      agentTasks.forEach((task, i) => {
+        const taskStart = new Date(startTime + i * taskDuration).toISOString();
+        const taskEnd = new Date(startTime + (i + 1) * taskDuration).toISOString();
+
+        finalExecutionLogs.push({
+          timestamp: taskStart,
+          taskId: task.id,
+          event: "started",
+          message: `Creating task: ${task.subject}`,
+        });
+
+        if (state.runtimeStatus === "COMPLETED") {
+          finalExecutionLogs.push({
+            timestamp: taskEnd,
+            taskId: task.id,
+            event: "completed",
+            message: `Created task: ${task.subject}`,
+            details: { blockedBy: task.blockedBy, blocks: task.blocks },
+          });
+        }
+      });
+    } else {
+      // Fallback to pattern steps
+      planTasks = planSteps.map((s, i) => ({
+        id: `step-${i}`,
+        title: s.title,
+        description: s.description,
+        status: state.runtimeStatus === "COMPLETED" ? "completed" as const : "pending" as const,
+      }));
+      finalExecutionLogs = executionLogs;
+    }
+
     // Build workflow entry from Dapr state
     const workflow: WorkflowEntry & { workflowType?: string; source?: string } = {
       id: state.instanceId,
@@ -411,23 +634,18 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         id: instanceId,
         title: planTitle,
         summary: planSummary,
-        tasks: planSteps.map((s, i) => ({
-          id: `step-${i}`,
-          title: s.title,
-          description: s.description,
-          status: state.runtimeStatus === "COMPLETED" ? "completed" as const : "pending" as const,
-        })),
+        tasks: planTasks,
       },
       // Add execution logs for the graph
       execution: {
-        currentTaskIndex: executionLogs.length,
-        completedTasks: executionLogs.filter(l => l.event === "completed").map(l => l.taskId),
-        failedTasks: executionLogs.filter(l => l.event === "failed").map(l => l.taskId),
+        currentTaskIndex: finalExecutionLogs.length,
+        completedTasks: finalExecutionLogs.filter(l => l.event === "completed").map(l => l.taskId),
+        failedTasks: finalExecutionLogs.filter(l => l.event === "failed").map(l => l.taskId),
         skippedTasks: [],
-        logs: executionLogs,
+        logs: finalExecutionLogs,
       },
       // Pattern-specific fields
-      workflowType: indexEntry?.workflowType,
+      workflowType: stateIndexEntry?.workflowType,
       source: "patterns",
     };
 
