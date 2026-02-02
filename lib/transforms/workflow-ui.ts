@@ -19,6 +19,10 @@ import type {
   DaprExecutionEventType,
   WorkflowCustomStatus,
   WorkflowPhase,
+  DaprAgentOutput,
+  DaprAgentTask,
+  TokenUsage,
+  TraceMetadata,
 } from "@/lib/types/workflow-ui";
 import type { AgentSession } from "@/lib/db/schema";
 
@@ -417,17 +421,37 @@ export function mapExecutionLogsToEvents(
     const eventType = mapExecutionLogEvent(log.event);
     const task = log.taskId ? taskMap.get(log.taskId) : undefined;
 
-    // Build input from task information
-    const input = task
-      ? {
-          taskId: task.id,
-          title: task.subject || task.title,
-          description: task.description,
-          dependsOn: task.dependsOn,
-          blockedBy: task.blockedBy,
-          blocks: task.blocks,
-        }
-      : undefined;
+    // Build input from task information or from log details for "started" events
+    let input: unknown;
+    let output: unknown;
+
+    if (log.event === "started") {
+      // For started events, log.details contains the activity input
+      input = log.details || (task
+        ? {
+            taskId: task.id,
+            title: task.subject || task.title,
+            description: task.description,
+            dependsOn: task.dependsOn,
+            blockedBy: task.blockedBy,
+            blocks: task.blocks,
+          }
+        : undefined);
+      output = undefined;
+    } else {
+      // For completed/failed/skipped events, log.details contains the output
+      input = task
+        ? {
+            taskId: task.id,
+            title: task.subject || task.title,
+            description: task.description,
+            dependsOn: task.dependsOn,
+            blockedBy: task.blockedBy,
+            blocks: task.blocks,
+          }
+        : undefined;
+      output = log.details;
+    }
 
     events.push({
       eventId: eventType === "TaskScheduled" ? null : eventId++,
@@ -435,7 +459,7 @@ export function mapExecutionLogsToEvents(
       name: log.taskId || null,
       timestamp: log.timestamp,
       input,
-      output: log.details,
+      output,
       metadata: {
         status: log.event,
         taskId: log.taskId,
@@ -517,6 +541,9 @@ export function toWorkflowListItem(
   if (workflow.source === "planner-agent" || workflow.source === "planner-orchestrator") {
     workflowType = workflow.workflowType || "planningAndExecutionWorkflow";
     appId = "planner-orchestrator";
+  } else if (workflow.source === "dapr-agent") {
+    workflowType = workflow.workflowType || "planner_workflow";
+    appId = "planner-dapr-agent";
   } else if (workflow.source === "patterns" && workflow.workflowType) {
     workflowType = `${workflow.workflowType}Workflow`;
     appId = "workflow-patterns";
@@ -594,6 +621,7 @@ export function toWorkflowDetail(
     customStatus?: WorkflowCustomStatus;
     sessionTitle?: string;
     sessionId?: string;
+    daprAgentOutput?: unknown;
   }
 ): WorkflowDetail {
   const listItem = toWorkflowListItem(workflow);
@@ -651,6 +679,12 @@ export function toWorkflowDetail(
     workflow.request ? { prompt: workflow.request.prompt } : undefined
   );
 
+  // Check if daprAgentOutput is valid DaprAgentOutput format
+  let daprAgentOutput: DaprAgentOutput | undefined;
+  if (workflow.daprAgentOutput && isDaprAgentOutput(workflow.daprAgentOutput)) {
+    daprAgentOutput = workflow.daprAgentOutput;
+  }
+
   return {
     ...listItem,
     executionDuration: calculateDuration(
@@ -660,6 +694,7 @@ export function toWorkflowDetail(
     input,
     output,
     executionHistory,
+    daprAgentOutput,
   };
 }
 
@@ -933,4 +968,129 @@ export function applyWorkflowFilters(
   filtered = filterWorkflowsByStatus(filtered, filters.status);
   filtered = filterWorkflowsByAppId(filtered, filters.appId);
   return filtered;
+}
+
+// ============================================================================
+// DaprAgent Output Detection & Parsing
+// ============================================================================
+
+/**
+ * Check if workflow output is from DaprOpenAIRunner (contains structured tasks/usage/trace)
+ */
+export function isDaprAgentOutput(output: unknown): output is DaprAgentOutput {
+  if (!output || typeof output !== "object") return false;
+  const obj = output as Record<string, unknown>;
+
+  // Check for DaprAgentOutput-specific fields
+  return (
+    Array.isArray(obj.tasks) ||
+    (obj.usage !== null && typeof obj.usage === "object") ||
+    (obj.trace !== null && typeof obj.trace === "object")
+  );
+}
+
+/**
+ * Parse DaprAgentOutput from workflow output
+ * Returns structured data for UI display
+ */
+export function parseDaprAgentOutput(output: unknown): {
+  tasks: DaprAgentTask[];
+  usage: TokenUsage | undefined;
+  trace: TraceMetadata | undefined;
+  planText: string | undefined;
+} {
+  if (!isDaprAgentOutput(output)) {
+    return {
+      tasks: [],
+      usage: undefined,
+      trace: undefined,
+      planText: undefined,
+    };
+  }
+
+  const obj = output as DaprAgentOutput;
+
+  // Parse tasks with validation
+  const tasks: DaprAgentTask[] = [];
+  if (Array.isArray(obj.tasks)) {
+    for (const task of obj.tasks) {
+      if (
+        task &&
+        typeof task === "object" &&
+        typeof task.id === "string" &&
+        typeof task.subject === "string"
+      ) {
+        tasks.push({
+          id: task.id,
+          subject: task.subject,
+          description: task.description || "",
+          status: isValidTaskStatus(task.status) ? task.status : "pending",
+          blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy : [],
+          blocks: Array.isArray(task.blocks) ? task.blocks : [],
+        });
+      }
+    }
+  }
+
+  // Parse usage with validation
+  let usage: TokenUsage | undefined;
+  if (obj.usage && typeof obj.usage === "object") {
+    const u = obj.usage as unknown as Record<string, unknown>;
+    if (
+      typeof u.input_tokens === "number" &&
+      typeof u.output_tokens === "number"
+    ) {
+      usage = {
+        input_tokens: u.input_tokens,
+        output_tokens: u.output_tokens,
+        total_tokens:
+          typeof u.total_tokens === "number"
+            ? u.total_tokens
+            : u.input_tokens + u.output_tokens,
+      };
+    }
+  }
+
+  // Parse trace with validation
+  let trace: TraceMetadata | undefined;
+  if (obj.trace && typeof obj.trace === "object") {
+    const t = obj.trace as unknown as Record<string, unknown>;
+    trace = {
+      trace_id: typeof t.trace_id === "string" ? t.trace_id : undefined,
+      agent_span_id:
+        typeof t.agent_span_id === "string" ? t.agent_span_id : undefined,
+      workflow_name:
+        typeof t.workflow_name === "string" ? t.workflow_name : undefined,
+      metadata:
+        t.metadata && typeof t.metadata === "object"
+          ? (t.metadata as unknown as Record<string, unknown>)
+          : undefined,
+    };
+  }
+
+  // Extract plan text from output field
+  const planText = typeof obj.output === "string" ? obj.output : undefined;
+
+  return { tasks, usage, trace, planText };
+}
+
+/**
+ * Validate task status string
+ */
+function isValidTaskStatus(
+  status: unknown
+): status is "pending" | "in_progress" | "completed" | "failed" {
+  return (
+    status === "pending" ||
+    status === "in_progress" ||
+    status === "completed" ||
+    status === "failed"
+  );
+}
+
+/**
+ * Format token count with thousands separator
+ */
+export function formatTokenCount(count: number): string {
+  return count.toLocaleString();
 }

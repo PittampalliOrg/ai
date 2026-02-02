@@ -35,21 +35,24 @@ import { useWorkflowsByName } from "@/hooks/use-workflows-by-name";
  * Check if a string is a workflow instance ID
  * Matches:
  * - Standard UUIDs: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
- * - Short workflow IDs: wf-xxxxxxxx (8 hex chars after "wf-")
+ * - Compact UUIDs: 32 hex chars without dashes (e.g., from uuid.hex in Python)
+ * - Short workflow IDs: wf-xxxxxxxx or wf-xxxxxxxxxxxx (8-12 hex chars after "wf-")
  * - Planner workflow IDs: planner-xxxxxxxxxxxx (12 hex chars after "planner-")
  * - Dapr agent workflow IDs: dapr-agent-xxxxxxxxxxxx (12 hex chars after "dapr-agent-")
  */
 function isInstanceId(str: string): boolean {
   // Standard UUID format
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  // Short workflow ID format (wf- followed by 8 hex chars)
-  const shortIdRegex = /^wf-[0-9a-f]{8}$/i;
+  // Compact UUID format (32 hex chars without dashes, e.g., from Python uuid.hex)
+  const compactUuidRegex = /^[0-9a-f]{32}$/i;
+  // Short workflow ID format (wf- followed by 8-12 hex chars)
+  const shortIdRegex = /^wf-[0-9a-f]{8,12}$/i;
   // Planner workflow ID format (planner- followed by 12 hex chars)
   const plannerIdRegex = /^planner-[0-9a-f]{12}$/i;
   // Dapr agent workflow ID format (dapr-agent- followed by 12 hex chars)
   const daprAgentIdRegex = /^dapr-agent-[0-9a-f]{12}$/i;
 
-  return uuidRegex.test(str) || shortIdRegex.test(str) || plannerIdRegex.test(str) || daprAgentIdRegex.test(str);
+  return uuidRegex.test(str) || compactUuidRegex.test(str) || shortIdRegex.test(str) || plannerIdRegex.test(str) || daprAgentIdRegex.test(str);
 }
 
 // ============================================================================
@@ -164,12 +167,20 @@ function ExecutionDetailView({ appId, instanceId }: ExecutionDetailViewProps) {
           {/* Input/Output Section */}
           <section>
             <h2 className="text-base font-semibold mb-4">Input / Output</h2>
-            <InputOutputSection input={workflow.input} output={workflow.output} />
+            <InputOutputSection
+              input={workflow.input}
+              output={workflow.output}
+              daprAgentOutput={workflow.daprAgentOutput}
+            />
           </section>
 
-          {/* Tabbed Section: Graph, History, Relationships */}
+          {/* Tabbed Section: Graph, History, Tasks, Relationships */}
           <section>
-            <WorkflowDetailTabs events={workflow.executionHistory} />
+            <WorkflowDetailTabs
+              events={workflow.executionHistory}
+              output={workflow.output}
+              daprAgentOutput={workflow.daprAgentOutput}
+            />
           </section>
         </div>
       </div>

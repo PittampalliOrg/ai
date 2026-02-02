@@ -24,6 +24,10 @@ const WORKFLOW_SERVICE_URL =
 const PLANNER_SERVICE_URL =
   process.env.PLANNER_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
 
+// Planner Dapr Agent service configuration
+const PLANNER_DAPR_AGENT_URL =
+  process.env.PLANNER_DAPR_AGENT_URL || "http://planner-dapr-agent.planner-agent.svc.cluster.local:8000";
+
 // ============================================================================
 // Pattern Step Definitions
 // ============================================================================
@@ -265,6 +269,122 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
     } catch (error) {
       console.log(`[Workflow Detail] Planner unavailable, trying workflow-patterns`);
+    }
+  }
+
+  // Try planner-dapr-agent (for wf-* workflow IDs)
+  if (instanceId.startsWith("wf-")) {
+    try {
+      const daprAgentUrl = `${PLANNER_DAPR_AGENT_URL}/status/${instanceId}`;
+      console.log(`[Workflow Detail] Fetching workflow from ${daprAgentUrl}`);
+
+      const response = await fetch(daprAgentUrl, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+
+        // Also get workflow details from /workflows/{id} endpoint
+        let details: Record<string, unknown> = {};
+        try {
+          const detailsResponse = await fetch(`${PLANNER_DAPR_AGENT_URL}/workflows/${instanceId}`);
+          if (detailsResponse.ok) {
+            details = await detailsResponse.json();
+          }
+        } catch {
+          // Ignore - details are optional
+        }
+
+        // Build execution logs from activities if available
+        const activities = (details.activities || []) as Array<{
+          activityName: string;
+          status: string;
+          startTime?: string;
+          endTime?: string;
+          durationMs?: number;
+          durationFormatted?: string;
+          input?: Record<string, unknown>;
+          output?: Record<string, unknown>;
+        }>;
+
+        const executionLogs: ExecutionLog[] = [];
+        for (const activity of activities) {
+          if (activity.startTime) {
+            executionLogs.push({
+              timestamp: activity.startTime,
+              taskId: activity.activityName,
+              event: "started",
+              message: `Starting: ${activity.activityName}`,
+              // Store input directly in details for mapExecutionLogsToEvents to pick up
+              details: activity.input,
+            });
+          }
+          if (activity.endTime && activity.status === "completed") {
+            executionLogs.push({
+              timestamp: activity.endTime,
+              taskId: activity.activityName,
+              event: "completed",
+              message: `Completed: ${activity.activityName}`,
+              details: {
+                duration: activity.durationFormatted || `${activity.durationMs}ms`,
+                ...(activity.output || {}),
+              },
+            });
+          }
+        }
+
+        // Parse output for plan details
+        const rawOutput = data.output as Record<string, unknown> | null;
+        const planContent = rawOutput?.plan as string | undefined;
+
+        // Check if this is DaprAgentOutput format (has tasks, usage, or trace)
+        const isDaprAgentOutput = rawOutput && (
+          Array.isArray(rawOutput.tasks) ||
+          (rawOutput.usage && typeof rawOutput.usage === "object") ||
+          (rawOutput.trace && typeof rawOutput.trace === "object")
+        );
+
+        const workflow: WorkflowEntry & { workflowType?: string; source?: string; appId?: string; daprAgentOutput?: unknown } = {
+          id: data.instance_id,
+          status: (data.status?.toUpperCase() || "UNKNOWN") as WorkflowEntry["status"],
+          createdAt: data.created_at || new Date().toISOString(),
+          updatedAt: details.updatedAt as string || new Date().toISOString(),
+          plan: planContent ? {
+            id: instanceId,
+            title: "Implementation Plan",
+            summary: planContent.slice(0, 200) + "...",
+            tasks: [{
+              id: "plan",
+              title: "Generated Plan",
+              description: planContent,
+              status: data.status === "completed" ? "completed" as const : "pending" as const,
+            }],
+          } : undefined,
+          execution: {
+            currentTaskIndex: executionLogs.filter(l => l.event === "completed").length,
+            completedTasks: executionLogs.filter(l => l.event === "completed").map(l => l.taskId),
+            failedTasks: [],
+            skippedTasks: [],
+            logs: executionLogs,
+          },
+          workflowType: "planner_workflow",
+          source: "dapr-agent",
+          appId: "planner-dapr-agent",
+          // Preserve raw DaprAgentOutput for UI detection
+          daprAgentOutput: isDaprAgentOutput ? rawOutput : undefined,
+        };
+
+        return NextResponse.json({ workflow });
+      }
+
+      if (response.status !== 404) {
+        const errorText = await response.text();
+        console.error(`[Workflow Detail] Planner Dapr Agent returned ${response.status}: ${errorText}`);
+      }
+    } catch (error) {
+      console.log(`[Workflow Detail] Planner Dapr Agent unavailable, trying workflow-patterns`);
     }
   }
 

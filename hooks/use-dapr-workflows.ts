@@ -130,9 +130,15 @@ export interface UseDaprWorkflowReturn {
 
 /**
  * API response type for workflow detail
+ * Extended with optional daprAgentOutput for DaprOpenAIRunner workflows
  */
 interface WorkflowDetailAPIResponse {
-  workflow: WorkflowEntry;
+  workflow: WorkflowEntry & {
+    workflowType?: string;
+    source?: string;
+    appId?: string;
+    daprAgentOutput?: unknown;
+  };
 }
 
 /**

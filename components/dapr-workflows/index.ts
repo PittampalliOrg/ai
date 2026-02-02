@@ -14,3 +14,9 @@ export { WorkflowDefinitionGraph } from "./workflow-definition-graph";
 export { ExecutionFlow } from "./execution-flow";
 export { ExecutionFlowNode } from "./execution-flow-node";
 export { EventDetailsPanel } from "./event-details-panel";
+
+// DaprAgent Output Components
+export { TaskListPanel } from "./task-list-panel";
+export { TaskDagGraph } from "./task-dag-graph";
+export { UsageMetricsPanel } from "./usage-metrics-panel";
+export { TraceMetadataPanel } from "./trace-metadata-panel";

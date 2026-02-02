@@ -136,6 +136,8 @@ export interface WorkflowDetail extends WorkflowListItem {
   input: unknown;
   output: unknown;
   executionHistory: DaprExecutionEvent[];
+  /** Raw DaprAgentOutput preserved from API for structured display */
+  daprAgentOutput?: DaprAgentOutput;
 }
 
 // ============================================================================
@@ -263,5 +265,92 @@ export function getPhaseColor(phase: WorkflowPhase): string {
       return "text-red-400";
     default:
       return "text-gray-400";
+  }
+}
+
+// ============================================================================
+// DaprAgent Output Types (for DaprOpenAIRunner workflows)
+// ============================================================================
+
+/**
+ * Task status for DaprAgent tasks
+ */
+export type DaprAgentTaskStatus = "pending" | "in_progress" | "completed" | "failed";
+
+/**
+ * Task from DaprOpenAIRunner output
+ */
+export interface DaprAgentTask {
+  id: string;
+  subject: string;
+  description: string;
+  status: DaprAgentTaskStatus;
+  blockedBy: string[];
+  blocks: string[];
+}
+
+/**
+ * Token usage metrics from DaprAgent output
+ */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+}
+
+/**
+ * Trace metadata from DaprAgent output
+ */
+export interface TraceMetadata {
+  trace_id?: string;
+  agent_span_id?: string;
+  workflow_name?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Output structure from DaprOpenAIRunner workflows
+ */
+export interface DaprAgentOutput {
+  status?: string;
+  output?: string;
+  tasks?: DaprAgentTask[];
+  usage?: TokenUsage;
+  trace?: TraceMetadata;
+}
+
+/**
+ * Get status icon color for DaprAgentTask status
+ */
+export function getTaskStatusColor(status: DaprAgentTaskStatus): string {
+  switch (status) {
+    case "pending":
+      return "text-gray-400";
+    case "in_progress":
+      return "text-blue-400";
+    case "completed":
+      return "text-green-400";
+    case "failed":
+      return "text-red-400";
+    default:
+      return "text-gray-400";
+  }
+}
+
+/**
+ * Get background color for DaprAgentTask status badge
+ */
+export function getTaskStatusBgColor(status: DaprAgentTaskStatus): string {
+  switch (status) {
+    case "pending":
+      return "bg-gray-500/20";
+    case "in_progress":
+      return "bg-blue-500/20";
+    case "completed":
+      return "bg-green-500/20";
+    case "failed":
+      return "bg-red-500/20";
+    default:
+      return "bg-gray-500/20";
   }
 }
