@@ -26,6 +26,7 @@ export type WorkflowStreamEventType =
   | "file_changed"
   | "task_progress"
   | "task_completed"
+  | "status"  // Workflow status updates from polling
   // Semantic task/plan events
   | "task_created"  // Task created via TaskCreate tool
   | "task_updated"  // Task status changed via TaskUpdate

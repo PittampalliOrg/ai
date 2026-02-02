@@ -1,0 +1,432 @@
+[
+  {
+    "key": "WORKFLOW_PATTERNS_ENABLED",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flag",
+      "source": "ConfigMap-dapr-config"
+    }
+  },
+  {
+    "key": "USE_DAPR_SERVICE_INVOCATION",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flag",
+      "source": "ConfigMap-dapr-config"
+    }
+  },
+  {
+    "key": "DAPR_WORKFLOW_ENABLED",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flag",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "USE_DAPR_STATE_STORE",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flag",
+      "source": "default"
+    }
+  },
+  {
+    "key": "USE_BUILT_IN_AGENTS",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flag",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "SANDBOX_MODE",
+    "value": "k8s",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "sandbox",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "SANDBOX_NAMESPACE",
+    "value": "agent-sandbox",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "sandbox",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "SANDBOX_TEMPLATE",
+    "value": "open-swe-dev",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "sandbox",
+      "source": "default"
+    }
+  },
+  {
+    "key": "SANDBOX_TIMEOUT",
+    "value": "30m",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "sandbox",
+      "source": "default"
+    }
+  },
+  {
+    "key": "WORKFLOW_SERVICE_URL",
+    "value": "http://planner-agent.planner-agent.svc.cluster.local:8080",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "PLANNER_SERVICE_URL",
+    "value": "http://planner-agent.planner-agent.svc.cluster.local:8080",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "derived"
+    }
+  },
+  {
+    "key": "PLANNER_AGENT_APP_ID",
+    "value": "planner-orchestrator.planner-agent",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
+    "key": "KGATEWAY_OPENAI_URL",
+    "value": "https://api.openai.com/v1",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "gateway",
+      "source": "default"
+    }
+  },
+  {
+    "key": "KGATEWAY_ANTHROPIC_URL",
+    "value": "https://api.anthropic.com/v1",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "gateway",
+      "source": "default"
+    }
+  },
+  {
+    "key": "KGATEWAY_GOOGLE_URL",
+    "value": "https://generativelanguage.googleapis.com/v1beta",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "gateway",
+      "source": "default"
+    }
+  },
+  {
+    "key": "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "value": "http://otel-collector.observability.svc.cluster.local:4318",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "ConfigMap-otel-config"
+    }
+  },
+  {
+    "key": "OTEL_EXPORTER_OTLP_PROTOCOL",
+    "value": "http/protobuf",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "ConfigMap-otel-config"
+    }
+  },
+  {
+    "key": "OTEL_SERVICE_NAME",
+    "value": "ai-chatbot",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "ConfigMap-otel-config"
+    }
+  },
+  {
+    "key": "OTEL_RESOURCE_ATTRIBUTES",
+    "value": "deployment.environment=production,service.namespace=ai-chatbot,service.version=1.0.0",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "OTEL_PROPAGATORS",
+    "value": "tracecontext,baggage",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "ConfigMap-otel-config"
+    }
+  },
+  {
+    "key": "OTEL_BSP_SCHEDULE_DELAY",
+    "value": "5000",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "ConfigMap-otel-config"
+    }
+  },
+  {
+    "key": "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+    "value": "512",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "observability",
+      "source": "ConfigMap-otel-config"
+    }
+  },
+  {
+    "key": "DAPR_STATE_STORE",
+    "value": "statestore",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "dapr-component",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "DAPR_PUBSUB",
+    "value": "taskpubsub",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "dapr-component",
+      "source": "default"
+    }
+  },
+  {
+    "key": "PUBSUB_NAME",
+    "value": "pubsub",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "dapr-component",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "AGENT_REGISTRY_STORE",
+    "value": "agentregistrystore",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "dapr-component",
+      "source": "default"
+    }
+  },
+  {
+    "key": "DAPR_WORKFLOW_STATE_STORE",
+    "value": "statestore",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "dapr-component",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "APP_NAMESPACE",
+    "value": "ai-chatbot",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "kubernetes",
+      "source": "default"
+    }
+  },
+  {
+    "key": "UPLOAD_DIR",
+    "value": "/app/uploads",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "storage",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "WORKING_DIRECTORY",
+    "value": "/workspace",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "storage",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "AUTH_TRUST_HOST",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "auth",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "AUTH_URL",
+    "value": "https://ai-chatbot.cnoe.localtest.me:8443",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "auth",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "CLAUDE_MODEL",
+    "value": "claude-sonnet-4-20250514",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "ai-model",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "CLAUDE_CODE_PATH",
+    "value": "/usr/local/bin/claude",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "claude-code",
+      "source": "default"
+    }
+  },
+  {
+    "key": "EXECUTION_TIMEOUT",
+    "value": "300000",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "execution",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "REDIS_HOST",
+    "value": "redis.ai-chatbot.svc.cluster.local",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "redis",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "REDIS_PORT",
+    "value": "6379",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "redis",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "WORKFLOW_REDIS_HOST",
+    "value": "redis-service.dapr-agents.svc.cluster.local",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "redis",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "WORKFLOW_REDIS_PORT",
+    "value": "6379",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "redis",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "WORKFLOW_STATE_KEY",
+    "value": "workflow-llm||llm.orchestrator:LLMOrchestrator:workflow_state",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "workflow",
+      "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "FLIPT_URL",
+    "value": "http://flipt.feature-flags.svc.cluster.local:8080",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flags",
+      "source": "ConfigMap-flipt-config"
+    }
+  },
+  {
+    "key": "FLIPT_NAMESPACE",
+    "value": "default",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flags",
+      "source": "ConfigMap-flipt-config"
+    }
+  },
+  {
+    "key": "FLIPT_ENABLED",
+    "value": "true",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flags",
+      "source": "ConfigMap-flipt-config"
+    }
+  }
+]

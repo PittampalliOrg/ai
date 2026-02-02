@@ -69,7 +69,7 @@ interface AgentActivityTabProps {
 type AgentUIPart = TextUIPart | ReasoningUIPart | DynamicToolUIPart;
 
 // Activity item types - supports both new AI SDK format and legacy format
-type ActivityType = "part" | "thinking" | "text" | "tool_call" | "tool_result" | "file_changed" | "progress" | "error" | "task_created" | "task_updated" | "plan_created" | "plan_complete";
+type ActivityType = "part" | "thinking" | "text" | "tool_call" | "tool_result" | "file_changed" | "progress" | "completed" | "error" | "task_created" | "task_updated" | "plan_created" | "plan_complete";
 
 interface ActivityItem {
   id: string;
@@ -340,7 +340,17 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
           id: event.id,
           type: "progress",
           timestamp: new Date(event.timestamp),
-          content: event.data.status || "Progress update",
+          content: event.data.status || event.data.message || "Progress update",
+        });
+        break;
+
+      case "task_completed":
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "completed",
+          timestamp: new Date(event.timestamp),
+          content: event.data.status || event.data.message || "Task completed",
         });
         break;
 
@@ -710,6 +720,8 @@ const ActivityCard = memo(function ActivityCard({ item, tasks = [] }: ActivityCa
       return <ToolCard item={item} />;
     case "progress":
       return <ProgressCard content={item.content || ""} />;
+    case "completed":
+      return <CompletedCard content={item.content || ""} />;
     case "error":
       return <ErrorCard content={item.content || ""} />;
     default:
@@ -1026,6 +1038,18 @@ const ProgressCard = memo(function ProgressCard({ content }: { content: string }
   return (
     <div className="ml-11 flex items-center gap-2 py-2">
       <Loader />
+      <span className="text-sm text-muted-foreground">{content}</span>
+    </div>
+  );
+});
+
+/**
+ * Completed card - shows phase/task completion
+ */
+const CompletedCard = memo(function CompletedCard({ content }: { content: string }) {
+  return (
+    <div className="ml-11 flex items-center gap-2 py-2">
+      <CheckCircle2Icon className="size-4 text-green-500" />
       <span className="text-sm text-muted-foreground">{content}</span>
     </div>
   );

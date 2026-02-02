@@ -9,10 +9,15 @@ import {
 } from "@/lib/db/agent-queries";
 import { verifyUserExists } from "@/lib/db/queries";
 import { invokeService } from "@/lib/dapr/client";
+import { getRepoAccessToken } from "@/lib/github/app-auth";
 
 // Planner orchestrator Dapr app ID (cross-namespace Dapr invocation)
 const PLANNER_ORCHESTRATOR_APP_ID =
   process.env.PLANNER_AGENT_APP_ID || "planner-orchestrator.planner-agent";
+
+// Planner dapr agent app ID (direct agent invocation for new workflow)
+const PLANNER_DAPR_AGENT_APP_ID =
+  process.env.PLANNER_DAPR_AGENT_APP_ID || "planner-dapr-agent.planner-agent";
 
 /**
  * GET /api/agent/sessions
@@ -88,7 +93,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Start workflow if requested (atomic session + workflow creation)
-    // All workflows run in planner-orchestrator for single source of truth
+    // Uses planner-dapr-agent for enhanced workflow with clone → planning → approval → execution → testing
     if (task && startWorkflow && targetRepository) {
       try {
         console.log(
@@ -98,40 +103,71 @@ export async function POST(request: NextRequest) {
           `[POST /api/agent/sessions] Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`
         );
 
-        // Call planner-orchestrator's workflow API via Dapr service invocation
-        // Map: UI sends {task}, orchestrator expects {feature_request, cwd}
-        // The workflow handles plan → persist → approve → execute
-        const workflowResponse = await invokeService<{ workflow_id: string; status: string; error?: string }>({
-          appId: PLANNER_ORCHESTRATOR_APP_ID,
+        // Get GitHub token for repository cloning
+        let repoToken: string | undefined;
+        try {
+          const tokenResult = await getRepoAccessToken(targetRepository.owner);
+          repoToken = tokenResult.token;
+          console.log(
+            `[POST /api/agent/sessions] Got ${tokenResult.source} token for ${targetRepository.owner}`
+          );
+        } catch (tokenError) {
+          console.warn(
+            `[POST /api/agent/sessions] Failed to get GitHub token, will try public clone:`,
+            tokenError
+          );
+        }
+
+        // Call planner-dapr-agent's workflow API via Dapr service invocation
+        // This uses the enhanced workflow with clone → planning → approval → execution → testing
+        const workflowResponse = await invokeService<{
+          workflow_id: string;
+          status: string;
+          message?: string;
+          approval_endpoint?: string;
+          error?: string;
+        }>({
+          appId: PLANNER_DAPR_AGENT_APP_ID,
           method: "POST",
-          path: "/api/workflows",
+          path: "/workflow/dapr",
           body: {
-            feature_request: task,
-            cwd: "/app/workspace",
+            task,
+            repository: {
+              owner: targetRepository.owner,
+              repo: targetRepository.repo,
+              branch: targetRepository.branch || "main",
+              token: repoToken,
+            },
+            auto_approve: false, // Require human approval
           },
           timeout: 60000,
         });
 
         if (workflowResponse.ok && workflowResponse.data) {
-          // Map: orchestrator returns workflow_id (snake_case)
           const workflowId = workflowResponse.data.workflow_id;
           console.log(
-            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-orchestrator (Dapr)`
+            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-dapr-agent (Dapr)`
           );
 
           // Link workflow to session
           await updateAgentSessionWorkflow({
             id: agentSession.id,
             workflowId,
-            workflowStatus: "pending",
+            workflowStatus: "running",
           });
 
-          // Return session with workflowId
+          // Return session with workflowId and approval info
           return NextResponse.json({
             session: {
               ...agentSession,
               workflowId,
-              workflowStatus: "pending",
+              workflowStatus: "running",
+            },
+            workflow: {
+              id: workflowId,
+              status: workflowResponse.data.status,
+              message: workflowResponse.data.message,
+              approvalEndpoint: workflowResponse.data.approval_endpoint,
             },
           });
         } else {

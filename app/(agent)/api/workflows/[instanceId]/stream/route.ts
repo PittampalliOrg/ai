@@ -21,10 +21,23 @@ import {
 } from "@/lib/workflow-patterns/runtime";
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
 import { getWorkflowEvents } from "@/lib/workflow-event-store";
+import { getAgentSession } from "@/lib/db/agent-queries";
 
 // Workflow orchestrator service configuration
 const WORKFLOW_SERVICE_URL =
   process.env.WORKFLOW_SERVICE_URL || "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
+
+// Planner dapr agent Dapr app ID (for wf- prefixed workflows)
+const PLANNER_DAPR_AGENT_APP_ID = process.env.PLANNER_DAPR_AGENT_APP_ID || "planner-dapr-agent.planner-agent";
+
+// Direct Kubernetes service URL for SSE streaming (bypasses Dapr to avoid buffering)
+// Dapr buffers HTTP responses which breaks SSE streaming
+const PLANNER_DAPR_AGENT_SERVICE_URL = process.env.PLANNER_DAPR_AGENT_SERVICE_URL ||
+  "http://planner-dapr-agent.planner-agent.svc.cluster.local:8000";
+
+// Dapr sidecar URL for service invocation (used for non-streaming requests)
+const DAPR_HTTP_PORT = process.env.DAPR_HTTP_PORT || "3500";
+const DAPR_SIDECAR_URL = `http://localhost:${DAPR_HTTP_PORT}`;
 
 // Enable workflow patterns
 const WORKFLOW_PATTERNS_ENABLED = process.env.WORKFLOW_PATTERNS_ENABLED === "true";
@@ -50,6 +63,10 @@ function mapEventType(type: string): string {
     task_started: "task_progress",
     task_completed: "task_completed",
     task_failed: "error",
+    // Phase events (from Dapr workflow activities)
+    phase_started: "task_progress",
+    phase_completed: "task_completed",
+    phase_failed: "error",
     // Execution events
     execution_started: "task_progress",
     execution_completed: "task_completed",
@@ -81,6 +98,24 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Check for planner-dapr-agent workflows (wf- prefix)
+  if (instanceId.startsWith("wf-")) {
+    console.log(`[Stream] Detected planner-dapr-agent workflow: ${instanceId}`);
+    return streamPlannerDaprAgent(instanceId);
+  }
+
+  // Check if this is a session ID that has a linked Dapr workflow
+  // Sessions created via /api/agent/sessions store their workflowId
+  try {
+    const session = await getAgentSession({ id: instanceId });
+    if (session?.workflowId && session.workflowId.startsWith("wf-")) {
+      console.log(`[Stream] Session ${instanceId} linked to workflow ${session.workflowId}`);
+      return streamPlannerDaprAgent(session.workflowId);
+    }
+  } catch (error) {
+    console.log(`[Stream] Not a valid session ID: ${instanceId}`);
   }
 
   // Try workflow-patterns first if enabled
@@ -122,6 +157,248 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   console.log(`[Stream] No events found after retries, falling back to workflow-orchestrator for ${instanceId}`);
   // Fall back to workflow-orchestrator
   return streamWorkflowOrchestrator(instanceId);
+}
+
+/**
+ * Stream from planner-dapr-agent (wf- prefixed workflows)
+ *
+ * Uses Dapr streaming subscriptions for real-time events.
+ * The planner-dapr-agent exposes an SSE endpoint at /workflows/{id}/stream
+ * that uses Dapr's pull-based streaming subscription.
+ *
+ * Architecture (no Redis intermediary needed):
+ * 1. On connect: planner-dapr-agent sends historical events from Dapr workflow state
+ * 2. Real-time: Dapr streaming subscription pushes events directly to SSE
+ *
+ * This function proxies the SSE stream from planner-dapr-agent to the client.
+ */
+async function streamPlannerDaprAgent(instanceId: string): Promise<Response> {
+  console.log(`[Stream] Connecting to planner-dapr-agent SSE stream for ${instanceId}`);
+
+  // Try direct Kubernetes service first (bypasses Dapr buffering for SSE)
+  try {
+    const directStreamUrl = `${PLANNER_DAPR_AGENT_SERVICE_URL}/workflows/${instanceId}/stream`;
+    console.log(`[Stream] Trying direct connection: ${directStreamUrl}`);
+
+    const response = await fetch(directStreamUrl, {
+      headers: {
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+    });
+
+    if (response.ok) {
+      console.log(`[Stream] Connected via direct K8s service for ${instanceId}`);
+      return new Response(response.body, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    }
+
+    console.warn(`[Stream] Direct connection failed: ${response.status}, trying Dapr...`);
+  } catch (error) {
+    console.warn(`[Stream] Direct connection error, trying Dapr:`, error);
+  }
+
+  // Fallback to Dapr service invocation (may have buffering issues with SSE)
+  try {
+    const streamUrl = `${DAPR_SIDECAR_URL}/v1.0/invoke/${PLANNER_DAPR_AGENT_APP_ID}/method/workflows/${instanceId}/stream`;
+    console.log(`[Stream] Trying Dapr service invocation: ${streamUrl}`);
+
+    const response = await fetch(streamUrl, {
+      headers: {
+        Accept: "text/event-stream",
+        "Cache-Control": "no-cache",
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[Stream] Dapr service invocation failed: ${response.status}`);
+      return streamPlannerDaprAgentPolling(instanceId);
+    }
+
+    console.log(`[Stream] Connected via Dapr for ${instanceId}`);
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
+    });
+  } catch (error) {
+    console.error(`[Stream] Error connecting to planner-dapr-agent stream:`, error);
+    return streamPlannerDaprAgentPolling(instanceId);
+  }
+}
+
+/**
+ * Fallback: Polling-based streaming for planner-dapr-agent
+ * Used when direct SSE proxy fails (e.g., older agent version)
+ */
+async function streamPlannerDaprAgentPolling(instanceId: string): Promise<Response> {
+  console.log(`[Stream] Using polling fallback for ${instanceId}`);
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      const sendEvent = (event: string, data: unknown) => {
+        const eventData = `data: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(eventData));
+      };
+
+      const sendError = (error: string) => {
+        sendEvent("error", {
+          id: `error-${Date.now()}`,
+          type: "error",
+          workflowId: instanceId,
+          data: { error },
+          timestamp: new Date().toISOString(),
+        });
+      };
+
+      try {
+        // Poll planner-dapr-agent for workflow status
+        const pollInterval = 1000; // 1 second for faster updates
+        const maxPollTime = 30 * 60 * 1000; // 30 minutes
+        const startTime = Date.now();
+        let lastStatus = "";
+        let lastPhase = "";
+        let lastEventIndex = 0; // Track activity events we've sent
+
+        // Send initial status event
+        sendEvent("initial", {
+          id: `init-${Date.now()}`,
+          type: "initial",
+          workflowId: instanceId,
+          data: {
+            status: "RUNNING",
+            content: "Connecting to workflow...",
+          },
+          timestamp: new Date().toISOString(),
+        });
+
+        while (Date.now() - startTime < maxPollTime) {
+          try {
+            // ============================================================
+            // Check for new activity events from pub/sub webhook (fallback)
+            // ============================================================
+            const activityEvents = await getWorkflowEvents(instanceId);
+            if (activityEvents.length > lastEventIndex) {
+              const newEvents = activityEvents.slice(lastEventIndex);
+              for (const activityEvent of newEvents) {
+                const mappedType = mapEventType(activityEvent.type);
+
+                // Debug log for tool events
+                if (activityEvent.type === "tool_call" || activityEvent.type === "tool_result") {
+                  console.log(
+                    `[Stream] Forwarding ${activityEvent.type}: toolName=${activityEvent.data?.toolName || "unknown"} callId=${activityEvent.data?.callId || "NONE"}`
+                  );
+                }
+
+                sendEvent(mappedType, {
+                  id: activityEvent.id || `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  type: mappedType,
+                  workflowId: instanceId,
+                  taskId: activityEvent.taskId,
+                  data: activityEvent.data,
+                  timestamp: activityEvent.timestamp,
+                });
+              }
+              lastEventIndex = activityEvents.length;
+            }
+
+            // ============================================================
+            // Poll workflow status from planner-dapr-agent
+            // ============================================================
+            const response = await fetch(
+              `${DAPR_SIDECAR_URL}/v1.0/invoke/${PLANNER_DAPR_AGENT_APP_ID}/method/workflows/${instanceId}`,
+              {
+                headers: { "Content-Type": "application/json" },
+              }
+            );
+
+            if (!response.ok) {
+              if (response.status === 404) {
+                sendError(`Workflow ${instanceId} not found in planner-dapr-agent`);
+                controller.close();
+                return;
+              }
+              throw new Error(`HTTP ${response.status}`);
+            }
+
+            const data = await response.json();
+            const currentStatus = data.status || "UNKNOWN";
+
+            // Get phase info from response (already parsed by backend)
+            const phase = data.phase || "";
+            const progress = data.progress || 0;
+            const message = data.message || "";
+            const plan = data.plan || null;
+
+            // Send update if status or phase changed
+            if (currentStatus !== lastStatus || phase !== lastPhase) {
+              lastStatus = currentStatus;
+              lastPhase = phase;
+
+              // Map status to UI-friendly format
+              const uiStatus = phase === "awaiting_approval" ? "AWAITING_APPROVAL" : currentStatus;
+
+              sendEvent("status", {
+                id: `status-${Date.now()}`,
+                type: "status",
+                workflowId: instanceId,
+                data: {
+                  status: uiStatus,
+                  phase,
+                  progress,
+                  message,
+                  plan,
+                  activities: data.activities || [],
+                },
+                timestamp: new Date().toISOString(),
+              });
+
+              // Check for terminal states
+              if (["COMPLETED", "FAILED", "TERMINATED"].includes(currentStatus)) {
+                console.log(`[Stream] Workflow ${instanceId} reached terminal state: ${currentStatus}`);
+                controller.close();
+                return;
+              }
+            }
+          } catch (pollError) {
+            console.error(`[Stream] Error polling planner-dapr-agent for ${instanceId}:`, pollError);
+            // Don't send error for transient failures, just log and continue
+          }
+
+          // Wait before next poll
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        // Timeout
+        sendError("Stream timed out after 30 minutes");
+        controller.close();
+      } catch (error) {
+        console.error(`[Stream] Error in planner-dapr-agent stream for ${instanceId}:`, error);
+        sendError(error instanceof Error ? error.message : "Unknown error");
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
 /**

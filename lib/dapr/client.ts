@@ -484,3 +484,200 @@ export function parseStateKey(key: string): {
 
   return { prefix: "", parts: [key] };
 }
+
+// ============================================================================
+// Configuration API
+// ============================================================================
+
+/**
+ * Configuration item returned from Dapr Configuration API
+ */
+export interface ConfigurationItem {
+  value: string;
+  version?: string;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Options for configuration retrieval
+ */
+export interface ConfigurationOptions {
+  /** Label to filter configuration items (e.g., "ai-chatbot") */
+  label?: string;
+  /** Additional metadata parameters */
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Get configuration values from a Dapr configuration store
+ *
+ * @param storeName - Name of the configuration store component
+ * @param keys - Array of configuration keys to retrieve
+ * @param options - Optional configuration options (label, metadata)
+ * @returns Record of key to ConfigurationItem
+ *
+ * @example
+ * ```ts
+ * const config = await getConfiguration("azureappconfig", ["WORKFLOW_PATTERNS_ENABLED"], { label: "ai-chatbot" });
+ * console.log(config["WORKFLOW_PATTERNS_ENABLED"]?.value); // "true"
+ * ```
+ */
+export async function getConfiguration(
+  storeName: string,
+  keys: string[],
+  options?: ConfigurationOptions
+): Promise<Record<string, ConfigurationItem>> {
+  try {
+    const url = new URL(daprUrl(`/v1.0/configuration/${storeName}`));
+
+    // Add keys as query parameters
+    keys.forEach((k) => url.searchParams.append("key", k));
+
+    // Add label if provided
+    if (options?.label) {
+      url.searchParams.set("metadata.label", options.label);
+    }
+
+    // Add any additional metadata
+    if (options?.metadata) {
+      Object.entries(options.metadata).forEach(([key, value]) => {
+        url.searchParams.set(`metadata.${key}`, value);
+      });
+    }
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Configuration get failed: ${response.status}`);
+    }
+
+    return (await response.json()) as Record<string, ConfigurationItem>;
+  } catch (error) {
+    console.error(`[Dapr] Failed to get configuration from ${storeName}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get all configuration values from a Dapr configuration store
+ *
+ * @param storeName - Name of the configuration store component
+ * @returns Record of key to ConfigurationItem
+ */
+export async function getAllConfiguration(
+  storeName: string
+): Promise<Record<string, ConfigurationItem>> {
+  try {
+    const response = await fetch(daprUrl(`/v1.0/configuration/${storeName}`), {
+      method: "GET",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Configuration get all failed: ${response.status}`);
+    }
+
+    return (await response.json()) as Record<string, ConfigurationItem>;
+  } catch (error) {
+    console.error(`[Dapr] Failed to get all configuration from ${storeName}:`, error);
+    throw error;
+  }
+}
+
+// ============================================================================
+// Secrets API
+// ============================================================================
+
+/**
+ * Get a single secret from a Dapr secrets store
+ *
+ * @param storeName - Name of the secrets store component (e.g., "azurekeyvault", "kubernetes")
+ * @param secretName - Name of the secret to retrieve
+ * @param metadata - Optional metadata for the request
+ * @returns The secret value
+ *
+ * @example
+ * ```ts
+ * const apiKey = await getSecret("azurekeyvault", "OPENAI-API-KEY");
+ * ```
+ */
+export async function getSecret(
+  storeName: string,
+  secretName: string,
+  metadata?: Record<string, string>
+): Promise<string> {
+  try {
+    const url = new URL(daprUrl(`/v1.0/secrets/${storeName}/${encodeURIComponent(secretName)}`));
+
+    // Add metadata as query params if provided
+    if (metadata) {
+      Object.entries(metadata).forEach(([key, value]) => {
+        url.searchParams.set(`metadata.${key}`, value);
+      });
+    }
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Secret get failed: ${response.status}`);
+    }
+
+    const data = (await response.json()) as Record<string, string>;
+    // Dapr returns { secretName: secretValue }
+    return data[secretName] ?? "";
+  } catch (error) {
+    console.error(`[Dapr] Failed to get secret ${secretName} from ${storeName}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Get all secrets from a Dapr secrets store (bulk operation)
+ *
+ * Note: Not all secret stores support bulk operations.
+ * Azure Key Vault and Kubernetes secrets do support this.
+ *
+ * @param storeName - Name of the secrets store component
+ * @returns Record of secret name to secret value
+ *
+ * @example
+ * ```ts
+ * const secrets = await getBulkSecrets("azurekeyvault");
+ * console.log(secrets["OPENAI-API-KEY"]); // "sk-..."
+ * ```
+ */
+export async function getBulkSecrets(
+  storeName: string
+): Promise<Record<string, string>> {
+  try {
+    const response = await fetch(daprUrl(`/v1.0/secrets/${storeName}/bulk`), {
+      method: "GET",
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Bulk secrets get failed: ${response.status}`);
+    }
+
+    // Dapr returns { secretName: { secretName: value } } for bulk
+    const data = (await response.json()) as Record<string, Record<string, string>>;
+
+    // Flatten to { secretName: value }
+    const flattened: Record<string, string> = {};
+    for (const [key, value] of Object.entries(data)) {
+      // The inner object has the same key as outer, value is the secret
+      flattened[key] = Object.values(value)[0] ?? "";
+    }
+
+    return flattened;
+  } catch (error) {
+    console.error(`[Dapr] Failed to get bulk secrets from ${storeName}:`, error);
+    throw error;
+  }
+}

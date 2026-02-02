@@ -244,15 +244,19 @@ export interface ReleaseOptions {
 }
 
 /**
- * Get sandbox configuration from environment variables
+ * Get sandbox configuration from Dapr Configuration store or environment variables
  */
 export function getSandboxConfig(): SandboxConfig {
+  // Import dynamically to avoid circular dependencies at module load time
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getConfig } = require("../dapr/config-provider");
+
   return {
-    mode: (process.env.SANDBOX_MODE as SandboxMode) || "local",
-    namespace: process.env.SANDBOX_NAMESPACE || "agent-sandbox",
-    templateName: process.env.SANDBOX_TEMPLATE || "open-swe-dev",
-    timeout: process.env.SANDBOX_TIMEOUT || "30m",
-    appNamespace: process.env.APP_NAMESPACE || "ai-chatbot",
+    mode: (getConfig("SANDBOX_MODE", "local") as SandboxMode),
+    namespace: getConfig("SANDBOX_NAMESPACE", "agent-sandbox"),
+    templateName: getConfig("SANDBOX_TEMPLATE", "open-swe-dev"),
+    timeout: getConfig("SANDBOX_TIMEOUT", "30m"),
+    appNamespace: getConfig("APP_NAMESPACE", "ai-chatbot"),
   };
 }
 

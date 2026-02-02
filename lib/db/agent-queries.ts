@@ -1,8 +1,8 @@
 "use server";
 
 import { and, asc, desc, eq, isNotNull, isNull, inArray, lt, or } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres, { type Sql } from "postgres";
 import {
   agentSession,
   agentMessage,
@@ -13,10 +13,38 @@ import {
   type TargetRepository,
   type GitHubInstallation,
 } from "./schema";
+import { getSecretValue } from "../dapr/config-provider";
 
-// biome-ignore lint: Forbidden non-null assertion.
-const client = postgres(process.env.POSTGRES_URL!);
-const db = drizzle(client);
+/**
+ * Lazy-initialized database connection
+ * Uses Dapr Secrets store or env var fallback for POSTGRES_URL
+ */
+let _client: Sql | null = null;
+let _db: PostgresJsDatabase | null = null;
+
+function getDb(): PostgresJsDatabase {
+  if (!_db) {
+    const connectionUrl = getSecretValue("POSTGRES_URL");
+    if (!connectionUrl) {
+      throw new Error("POSTGRES_URL is required for database connection");
+    }
+    _client = postgres(connectionUrl);
+    _db = drizzle(_client);
+  }
+  return _db;
+}
+
+// Proxy for backwards compatibility
+const db = new Proxy({} as PostgresJsDatabase, {
+  get(_target, prop) {
+    const instance = getDb();
+    const value = instance[prop as keyof PostgresJsDatabase];
+    if (typeof value === "function") {
+      return value.bind(instance);
+    }
+    return value;
+  },
+});
 
 // ============================================================================
 // Agent Session Queries

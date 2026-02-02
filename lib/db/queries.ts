@@ -12,8 +12,8 @@ import {
   lt,
   type SQL,
 } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres, { type Sql } from "postgres";
 import type { ArtifactKind } from "@/components/artifact";
 import type { VisibilityType } from "@/components/visibility-selector";
 import { ChatSDKError } from "../errors";
@@ -32,14 +32,48 @@ import {
   vote,
 } from "./schema";
 import { generateHashedPassword } from "./utils";
+import { getSecretValue } from "../dapr/config-provider";
 
 // Optionally, if not using email/pass login, you can
 // use the Drizzle adapter for Auth.js / NextAuth
 // https://authjs.dev/reference/adapter/drizzle
 
-// biome-ignore lint: Forbidden non-null assertion.
-const client = postgres(process.env.POSTGRES_URL!);
-const db = drizzle(client);
+/**
+ * Lazy-initialized database connection
+ *
+ * Uses config-provider which supports Dapr Secrets store or env var fallback.
+ * This allows POSTGRES_URL to be managed through Dapr Secrets building block.
+ */
+let _client: Sql | null = null;
+let _db: PostgresJsDatabase | null = null;
+
+function getDb(): PostgresJsDatabase {
+  if (!_db) {
+    // Get connection URL from Dapr Secrets or env var
+    const connectionUrl = getSecretValue("POSTGRES_URL");
+    if (!connectionUrl) {
+      throw new ChatSDKError(
+        "bad_request:database",
+        "POSTGRES_URL is required for database connection"
+      );
+    }
+    _client = postgres(connectionUrl);
+    _db = drizzle(_client);
+  }
+  return _db;
+}
+
+// For backwards compatibility, export a getter that returns the db instance
+const db = new Proxy({} as PostgresJsDatabase, {
+  get(_target, prop) {
+    const instance = getDb();
+    const value = instance[prop as keyof PostgresJsDatabase];
+    if (typeof value === "function") {
+      return value.bind(instance);
+    }
+    return value;
+  },
+});
 
 export async function getUser(email: string): Promise<User[]> {
   try {

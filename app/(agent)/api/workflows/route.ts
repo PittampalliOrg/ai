@@ -27,6 +27,10 @@ const WORKFLOW_SERVICE_URL =
 const PLANNER_SERVICE_URL =
   process.env.PLANNER_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
 
+// Planner Dapr Agent service configuration
+const PLANNER_DAPR_AGENT_URL =
+  process.env.PLANNER_DAPR_AGENT_URL || "http://planner-dapr-agent.planner-agent.svc.cluster.local:8000";
+
 /**
  * GET /api/workflows
  *
@@ -185,6 +189,53 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Fetch from planner-dapr-agent service
+  if (source === "all" || source === "dapr-agent") {
+    try {
+      const response = await fetch(
+        `${PLANNER_DAPR_AGENT_URL}/workflows`,
+        {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          next: { revalidate: 0 },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+
+        interface DaprAgentWorkflow {
+          instanceId: string;
+          workflowName?: string;
+          status: string;
+          createdAt?: string;
+          updatedAt?: string;
+          completedAt?: string;
+        }
+
+        const workflows = data.workflows || [];
+        const mapped: UIWorkflowListItem[] = workflows.map((w: DaprAgentWorkflow) => {
+          const uiStatus = mapWorkflowStatus(w.status.toUpperCase() as WorkflowStatus);
+          return {
+            instanceId: w.instanceId,
+            workflowType: w.workflowName || "planner_workflow",
+            appId: "planner-dapr-agent",
+            status: uiStatus,
+            startTime: w.createdAt || "",
+            endTime: (uiStatus === "COMPLETED" || uiStatus === "FAILED")
+              ? (w.completedAt || w.updatedAt || null)
+              : null,
+          };
+        });
+
+        allWorkflows.push(...mapped);
+      }
+    } catch (error) {
+      console.error("[Workflows List] Planner Dapr Agent error:", error);
+      // Don't set error - service is optional
+    }
+  }
+
   // Fetch from workflow-patterns index
   if (source === "all" || source === "patterns") {
     try {
@@ -233,16 +284,42 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // Deduplicate workflows by instanceId
+  // Priority: planner-dapr-agent > planner-orchestrator > workflow-orchestrator > workflow-patterns
+  const appIdPriority: Record<string, number> = {
+    "planner-dapr-agent": 4,
+    "planner-orchestrator": 3,
+    "workflow-orchestrator": 2,
+    "workflow-patterns": 1,
+  };
+
+  const workflowMap = new Map<string, UIWorkflowListItem>();
+  for (const workflow of allWorkflows) {
+    const existing = workflowMap.get(workflow.instanceId);
+    if (!existing) {
+      workflowMap.set(workflow.instanceId, workflow);
+    } else {
+      // Keep the one with higher priority appId
+      const existingPriority = appIdPriority[existing.appId] || 0;
+      const newPriority = appIdPriority[workflow.appId] || 0;
+      if (newPriority > existingPriority) {
+        workflowMap.set(workflow.instanceId, workflow);
+      }
+    }
+  }
+
+  const deduplicatedWorkflows = Array.from(workflowMap.values());
+
   // Sort by startTime descending (newest first)
-  allWorkflows.sort((a, b) => {
+  deduplicatedWorkflows.sort((a, b) => {
     const dateA = new Date(a.startTime).getTime();
     const dateB = new Date(b.startTime).getTime();
     return dateB - dateA;
   });
 
   // Apply pagination
-  const total = allWorkflows.length;
-  const paginated = allWorkflows.slice(offset, offset + limit);
+  const total = deduplicatedWorkflows.length;
+  const paginated = deduplicatedWorkflows.slice(offset, offset + limit);
 
   // Build response (using UI-compatible format)
   const response: {

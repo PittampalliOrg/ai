@@ -192,7 +192,9 @@ export async function GET() {
   if (daprAvailable) {
     try {
       // Must specify keys explicitly - Azure App Config doesn't support "get all"
-      const configResult = await getConfiguration(CONFIG_STORE, [...CONFIG_KEYS]);
+      const configResult = await getConfiguration(CONFIG_STORE, [...CONFIG_KEYS], {
+        label: "ai-chatbot",
+      });
       console.log("[Configuration API] getConfiguration returned:", Object.keys(configResult).length, "keys");
       response.sources.azureAppConfig.available = true;
 

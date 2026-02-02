@@ -355,8 +355,32 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
           id: event.id,
           type: "progress",
           timestamp: new Date(event.timestamp),
-          content: (event.data.status as string) || "Progress update",
+          content: (event.data.status as string) || (event.data.message as string) || "Progress update",
         });
+        break;
+
+      case "task_completed":
+        flushAllText();
+        items.push({
+          id: event.id,
+          type: "progress",
+          timestamp: new Date(event.timestamp),
+          content: (event.data.status as string) || (event.data.message as string) || "Completed",
+          status: "success",
+        });
+        break;
+
+      case "status":
+        // Status updates from workflow polling
+        flushAllText();
+        if (event.data.message || event.data.phase) {
+          items.push({
+            id: event.id,
+            type: "progress",
+            timestamp: new Date(event.timestamp),
+            content: (event.data.message as string) || `Phase: ${event.data.phase}`,
+          });
+        }
         break;
 
       case "error":

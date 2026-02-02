@@ -7,6 +7,7 @@
 
 import "server-only";
 import Redis from "ioredis";
+import { getSecretValue } from "../dapr/config-provider";
 
 // Initialize Redis client (supports both local and cloud Redis)
 let redis: Redis | null = null;
@@ -14,14 +15,17 @@ let redis: Redis | null = null;
 function getRedisClient(): Redis | null {
   if (redis) return redis;
 
+  // Get Redis URL from Dapr Secrets or env var fallback
+  const redisUrl = getSecretValue("REDIS_URL");
+
   // Only initialize if REDIS_URL is provided
-  if (!process.env.REDIS_URL) {
+  if (!redisUrl) {
     console.warn("[Cache] REDIS_URL not configured, caching disabled");
     return null;
   }
 
   try {
-    redis = new Redis(process.env.REDIS_URL, {
+    redis = new Redis(redisUrl, {
       maxRetriesPerRequest: 3,
       retryStrategy: (times) => {
         if (times > 3) {

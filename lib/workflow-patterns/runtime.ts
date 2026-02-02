@@ -11,6 +11,7 @@ import {
   type TWorkflow,
   type WorkflowActivityContext,
 } from "@dapr/dapr";
+import { getConfig, isFeatureEnabled } from "../dapr/config-provider";
 
 /**
  * Type for workflow activities (matches Dapr's TWorkflowActivity)
@@ -33,9 +34,18 @@ let initializationPromise: Promise<void> | null = null;
 // Configuration
 // ============================================================================
 
+// Note: DAPR_HOST and DAPR_GRPC_PORT are bootstrap values that cannot come from Dapr
+// because they are needed to connect TO Dapr in the first place
 const DAPR_HOST = process.env.DAPR_HOST || "localhost";
 const DAPR_GRPC_PORT = process.env.DAPR_GRPC_PORT || "50001";
-const WORKFLOW_PATTERNS_ENABLED = process.env.WORKFLOW_PATTERNS_ENABLED === "true";
+
+/**
+ * Check if workflow patterns are enabled
+ * Uses config-provider which supports both Dapr Configuration and env vars
+ */
+function isWorkflowPatternsEnabled(): boolean {
+  return isFeatureEnabled("WORKFLOW_PATTERNS_ENABLED");
+}
 
 // ============================================================================
 // Type Exports
@@ -70,8 +80,8 @@ export async function initializeWorkflowPatternsRuntime(): Promise<{
     }
   }
 
-  // Check if workflow patterns are enabled
-  if (!WORKFLOW_PATTERNS_ENABLED) {
+  // Check if workflow patterns are enabled (via Dapr Configuration or env var)
+  if (!isWorkflowPatternsEnabled()) {
     console.log("[Workflow Patterns] Runtime is disabled (WORKFLOW_PATTERNS_ENABLED != true)");
     throw new Error("Workflow Patterns runtime is disabled");
   }

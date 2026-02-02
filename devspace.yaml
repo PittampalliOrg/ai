@@ -16,35 +16,52 @@
 version: v2beta1
 name: ai-chatbot
 
+# Import shared variable definitions from templates
+imports:
+  - path: ../../stacks/main/devspace-templates/base.yaml
+  - path: ../../stacks/main/devspace-templates/snippets/nextjs.yaml
+
+# App-specific variable values
+vars:
+  APP_NAME: ai-chatbot
+  LOCAL_PORT: "3000"
+  CONTAINER_PORT: "3000"
+  SSH_PORT: "2222"
+  RUN_MIGRATIONS: "true"
+  MIGRATION_COMMAND: "pnpm tsx lib/db/migrate"
+  INSTALL_CLAUDE_CLI: "true"
+
 # Development configuration
 dev:
   app:
-    # Target the deployment by image selector (more reliable for workload identification)
-    namespace: ai-chatbot
-    imageSelector: gitea.cnoe.localtest.me:8443/giteaadmin/ai-chatbot
-    container: ai-chatbot
+    # Target the deployment by image selector
+    namespace: ${APP_NAME}
+    imageSelector: ${GITEA_HOST}/${GITEA_USER}/${APP_NAME}
+    container: ${APP_NAME}
 
-    # Replace production image with devcontainer
-    devImage: gitea.cnoe.localtest.me:8443/giteaadmin/ai-chatbot-devspace:latest
+    # Use shared devcontainer (instead of per-app image)
+    devImage: ${GITEA_HOST}/${GITEA_USER}/nodejs-22-devspace:latest
     workingDir: /app
 
     # Resource requirements for development
     resources:
       requests:
-        cpu: "500m"
-        memory: "2Gi"
+        cpu: ${CPU_REQUEST}
+        memory: ${MEMORY_REQUEST}
       limits:
-        cpu: "4"
-        memory: "8Gi"
+        cpu: ${CPU_LIMIT}
+        memory: ${MEMORY_LIMIT}
 
     # Command to run in the container
-    # Runs pnpm install (with caching), migrations, then starts dev server
     command:
       - /bin/sh
       - -c
       - |
         set -e
         echo "=== DevSpace Development Container ==="
+        echo "Replacing production image: ${CURRENT_PRODUCTION_IMAGE}"
+        echo "Using shared devcontainer: nodejs-22-devspace"
+        echo ""
 
         # Install Claude Code CLI globally (for Claude Code provider)
         echo "Installing Claude Code CLI..."
@@ -53,7 +70,7 @@ dev:
         # Always enable corepack and pnpm (required even if node_modules cached)
         echo "Enabling corepack and pnpm..."
         corepack enable
-        corepack prepare pnpm@9.12.3 --activate
+        corepack prepare pnpm@${PNPM_VERSION} --activate
 
         echo "Checking dependencies..."
         # Only install if node_modules is missing or package.json changed
@@ -68,23 +85,21 @@ dev:
 
         # Run database migrations (idempotent - only applies pending migrations)
         echo "Running database migrations..."
-        pnpm tsx lib/db/migrate || echo "⚠️  Migrations skipped (database may not be ready)"
+        pnpm tsx lib/db/migrate || echo "Migrations skipped (database may not be ready)"
 
         echo "Starting Next.js development server..."
         exec pnpm dev
 
     # File synchronization
-    # Sync only essential source code to container
-    # Uses emptyDir volume for /app to ensure proper write permissions
     sync:
       - path: ./:/app
         initialSync: mirrorLocal
         startContainer: true
         waitInitialSync: true
         onUpload:
-          restartContainer: false  # Hot-reload handles changes
+          restartContainer: false
         excludePaths:
-          # === NEVER SYNC (large/binary/generated) ===
+          # Node.js / Next.js artifacts
           - node_modules/
           - .pnpm-store/
           - .next/
@@ -92,7 +107,7 @@ dev:
           - out/
           - coverage/
           - next-env.d.ts
-          # === DEV TOOLING (not needed in container) ===
+          # Dev tooling
           - .devenv/
           - .devspace/
           - .direnv/
@@ -102,13 +117,13 @@ dev:
           - .idea/
           - .vscode/
           - .cursor/
-          # === TEST FILES (not needed for dev server) ===
+          # Test files
           - tests/
           - playwright-report/
           - test-results/
           - playwright.config.ts
           - vitest.config.ts
-          # === DOCS & CONFIG (not needed at runtime) ===
+          # Docs & config
           - docs/
           - scripts/
           - "*.md"
@@ -125,6 +140,7 @@ dev:
           - .gitignore
           - .env.local
           - .env.example
+          # App-specific
           - cookies.txt
 
     # Persistent paths for faster subsequent starts
@@ -132,33 +148,29 @@ dev:
       - path: /tmp
         skipPopulate: true
       - path: /app/node_modules
-        # Cache node_modules for faster startup
 
     # Patches to configure the pod for development
     patches:
-      # Remove health checks (dev server startup is slower)
       - op: remove
-        path: spec.containers.name=ai-chatbot.livenessProbe
+        path: spec.containers.name=${APP_NAME}.livenessProbe
       - op: remove
-        path: spec.containers.name=ai-chatbot.readinessProbe
-      # Run ai-chatbot container as root for development to avoid permission issues
-      # Keep pod-level securityContext compatible with Dapr sidecar (non-root)
+        path: spec.containers.name=${APP_NAME}.readinessProbe
       - op: replace
-        path: spec.containers.name=ai-chatbot.securityContext
+        path: spec.containers.name=${APP_NAME}.securityContext
         value:
           runAsUser: 0
           runAsGroup: 0
           runAsNonRoot: false
           allowPrivilegeEscalation: false
-      # Keep pod fsGroup for volume permissions, but allow non-root override per container
       - op: replace
         path: spec.securityContext
         value:
           fsGroup: 1001
           runAsNonRoot: false
+
     # Port forwarding for development
     ports:
-      - port: "3000"  # Next.js dev server
+      - port: "${LOCAL_PORT}:${CONTAINER_PORT}"
 
     # SSH access for debugging
     ssh:
@@ -166,15 +178,12 @@ dev:
       localPort: 2222
 
     # Environment variables for development
-    # Only override values that differ from production deployment
-    # All other env vars come from ConfigMaps and the base Deployment
     env:
       - name: NODE_ENV
         value: development
       - name: NEXT_TELEMETRY_DISABLED
         value: "1"
-      # Override OTEL service name and environment for dev
       - name: OTEL_SERVICE_NAME
-        value: "ai-chatbot-dev"
+        value: ${OTEL_SERVICE_NAME}
       - name: OTEL_RESOURCE_ATTRIBUTES
-        value: "deployment.environment=development,service.namespace=ai-chatbot-dev,service.version=dev"
+        value: "deployment.environment=${OTEL_ENVIRONMENT},service.namespace=${APP_NAME}-dev,service.version=dev"

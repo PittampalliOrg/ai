@@ -4,6 +4,7 @@ import GitHub from "next-auth/providers/github";
 import { isDevelopmentEnvironment } from "@/lib/constants";
 import { findOrCreateGitHubUser } from "@/lib/db/queries";
 import { authConfig } from "./auth.config";
+import { getSecretValue } from "@/lib/dapr/config-provider";
 
 // Simplified: All users are "regular" GitHub users
 export type UserType = "regular";
@@ -57,8 +58,8 @@ async function refreshGitHubToken(token: JWT): Promise<JWT> {
         Accept: "application/json",
       },
       body: new URLSearchParams({
-        client_id: process.env.GITHUB_CLIENT_ID!,
-        client_secret: process.env.GITHUB_CLIENT_SECRET!,
+        client_id: getSecretValue("GITHUB_APP_CLIENT_ID") || process.env.GITHUB_CLIENT_ID!,
+        client_secret: getSecretValue("GITHUB_APP_CLIENT_SECRET") || process.env.GITHUB_CLIENT_SECRET!,
         grant_type: "refresh_token",
         refresh_token: token.refreshToken,
       }),
@@ -100,9 +101,10 @@ export const {
   useSecureCookies: !isDevelopmentEnvironment, // Match proxy.ts secureCookie setting
   providers: [
     // GitHub OAuth with repo access for coding agent (GitHub-only auth)
+    // Credentials from Dapr Secrets store or env var fallback
     GitHub({
-      clientId: process.env.GITHUB_CLIENT_ID!,
-      clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      clientId: getSecretValue("GITHUB_APP_CLIENT_ID") || process.env.GITHUB_CLIENT_ID!,
+      clientSecret: getSecretValue("GITHUB_APP_CLIENT_SECRET") || process.env.GITHUB_CLIENT_SECRET!,
       authorization: {
         params: {
           scope: "read:user user:email repo", // repo scope for code access

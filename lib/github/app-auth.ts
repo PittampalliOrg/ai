@@ -4,6 +4,7 @@
  */
 
 import { createSign } from "crypto";
+import { getSecretValue } from "../dapr/config-provider";
 
 interface InstallationToken {
   token: string;
@@ -16,8 +17,9 @@ interface InstallationToken {
  * Generate a JWT for GitHub App authentication using Node.js crypto
  */
 function generateAppJWT(): string {
-  const appId = process.env.GITHUB_APP_ID;
-  const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
+  // Get credentials from Dapr Secrets store (or env var fallback)
+  const appId = getSecretValue("GITHUB_APP_ID");
+  const privateKey = getSecretValue("GITHUB_APP_PRIVATE_KEY");
 
   if (!appId || !privateKey) {
     throw new Error("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY are required");
@@ -154,7 +156,9 @@ export async function getRepoAccessToken(
   userOAuthToken?: string
 ): Promise<{ token: string; source: "app" | "oauth" }> {
   // Try GitHub App installation token first
-  if (process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PRIVATE_KEY) {
+  const appId = getSecretValue("GITHUB_APP_ID");
+  const privateKey = getSecretValue("GITHUB_APP_PRIVATE_KEY");
+  if (appId && privateKey) {
     try {
       const installationId = await getInstallationForOwner(owner);
       if (installationId) {
