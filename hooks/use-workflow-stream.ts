@@ -8,36 +8,78 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import type { TextStreamPart, ToolSet } from "ai";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 /**
- * Types of streaming events from workflow agents
+ * Extract the 'type' field from Vercel AI SDK's TextStreamPart union type
+ * This keeps our types in sync with the AI SDK automatically
  */
-export type WorkflowStreamEventType =
-  | "initial"
-  | "part"  // AI SDK-compatible part events (TextUIPart, ReasoningUIPart, DynamicToolUIPart)
-  | "llm_chunk"  // Legacy: text chunks
-  | "thinking"  // Legacy: Claude's extended thinking (internal reasoning)
-  | "tool_call"  // Legacy: tool invocation
-  | "tool_result"  // Legacy: tool result
-  | "file_changed"
-  | "task_progress"
-  | "task_completed"
-  | "status"  // Workflow status updates from polling
-  // Semantic task/plan events
-  | "task_created"  // Task created via TaskCreate tool
-  | "task_updated"  // Task status changed via TaskUpdate
-  | "plan_created"  // Agent entered plan mode via EnterPlanMode
-  | "plan_complete" // Agent completed plan via ExitPlanMode
-  | "heartbeat"
-  | "stream_timeout"
-  | "error";
+type VercelAIEventType = TextStreamPart<ToolSet>["type"];
 
 /**
- * Task data structure from Claude Code's native task system
+ * Backend-specific event types not covered by Vercel AI SDK
+ */
+type BackendEventType =
+  // Lifecycle events
+  | "initial"
+  | "status"
+  | "heartbeat"
+  | "ping"
+  | "stream_done"
+  // Task/workflow progress
+  | "task_progress"
+  | "task_completed"
+  | "execution_started"
+  | "execution_completed"
+  | "execution_failed"
+  | "phase_completed"
+  // LLM/text streaming (Claude style)
+  | "llm_chunk"
+  | "message_start"
+  | "message_delta"
+  | "message_stop"
+  | "content_block_start"
+  | "content_block_delta"
+  | "content_block_stop"
+  | "text_delta"
+  | "thinking_delta"
+  // Tool events (alternative naming)
+  | "tool_call"
+  | "tool_result"
+  | "tool_called"
+  | "tool_output"
+  | "tool-call-streaming-start"
+  | "tool-call-delta"
+  // Handoff/agent events (OpenAI style)
+  | "handoff_requested"
+  | "handoff_occured"
+  | "agent_updated"
+  // MCP events
+  | "mcp_approval_requested"
+  | "mcp_approval_response";
+
+/**
+ * Types of streaming events from workflow agents
+ *
+ * Comprehensive event types covering:
+ * - Vercel AI SDK events (auto-synced via TextStreamPart import)
+ * - Claude Agent SDK events (message_start, content_block_*, text_delta, etc.)
+ * - OpenAI Agents SDK events (tool_called, tool_output, handoff_*, etc.)
+ * - Planner-dapr-agent events (status, execution_*, phase_completed, etc.)
+ */
+export type WorkflowStreamEventType = VercelAIEventType | BackendEventType | string;
+
+/**
+ * Agent identifiers for multi-agent streaming
+ */
+export type AgentId = "claude-planner" | "claude-code-agent";
+
+/**
+ * Task data structure for displaying task cards
  */
 export interface TaskData {
   id: string;
@@ -50,72 +92,93 @@ export interface TaskData {
 }
 
 /**
- * Agent identifiers for multi-agent streaming
- */
-export type AgentId = "claude-planner" | "claude-code-agent";
-
-/**
  * Data payload for different event types
  *
- * For "part" events, the data contains AI SDK UI Part structures:
- * - TextUIPart: { type: "text", text: string, state?: "streaming" | "done" }
- * - ReasoningUIPart: { type: "reasoning", text: string, state?: "streaming" | "done" }
- * - DynamicToolUIPart: { type: "dynamic-tool", toolCallId: string, toolName: string, state: ..., input: ..., output?: ..., errorText?: ... }
+ * Supports fields from Claude, OpenAI, and Vercel AI SDK event formats
  */
 export interface WorkflowStreamEventData {
-  // AI SDK Part type identifier (for "part" events)
-  /** Part type: "text" | "reasoning" | "dynamic-tool" */
-  type?: string;
-  /** Text content for text/reasoning parts and llm_chunk events */
-  text?: string;
-  /** State for AI SDK parts: "streaming" | "done" | tool states */
-  state?: string;
-  /** Tool call ID for dynamic-tool parts */
-  toolCallId?: string;
-  /** Input for dynamic-tool parts */
-  input?: unknown;
-  /** Output for dynamic-tool parts */
-  output?: unknown;
-  /** Error text for dynamic-tool parts */
-  errorText?: string;
-
-  // Semantic task/plan event fields
-  /** Task data for task_created events */
-  task?: TaskData;
-  /** Task ID for task_updated events */
-  taskId?: string;
-  /** New status for task_updated events */
-  taskStatus?: "pending" | "in_progress" | "completed";
-
-  // Legacy fields (for backward compatibility)
-  /** Text content for llm_chunk events */
+  /** Text content for llm_chunk/text_delta events */
   content?: string;
-  /** Tool name for tool_call/tool_result events */
-  toolName?: string;
-  /** Tool input for tool_call events */
-  toolInput?: unknown;
-  /** Tool output for tool_result events (legacy field) */
-  toolOutput?: string;
-  /** Tool result for tool_result events (from planner-agent backend) */
-  result?: string;
-  /** Call ID for correlating tool_call with tool_result */
-  callId?: string;
-  /** Whether the tool result is an error */
-  isError?: boolean;
-  /** Full length of result before truncation */
-  fullLength?: number;
-  /** File path for file_changed events */
-  filePath?: string;
-  /** Operation type for file_changed events (create, modify, delete) */
-  operation?: string;
-  /** Status message for task_progress events */
+  /** Alternative text content field (used by some event sources) */
+  text?: string;
+  /** Status message for progress events */
   status?: string;
+  /** Human-readable message */
+  message?: string;
   /** Progress percentage (0-100) */
   progress?: number;
   /** Error message for error events */
   error?: string;
+
+  // Tool-related fields (multiple naming conventions)
+  /** Tool name (Claude/custom style) */
+  toolName?: string;
+  /** Tool name (OpenAI/Vercel style) */
+  name?: string;
+  /** Tool input (Claude style) */
+  toolInput?: unknown;
+  /** Tool input (OpenAI style) */
+  input?: unknown;
+  /** Tool arguments (Vercel style) */
+  arguments?: unknown;
+  /** Tool output (Claude style) */
+  toolOutput?: string;
+  /** Tool output (OpenAI style) */
+  output?: string;
+  /** Tool result (Vercel style) */
+  result?: unknown;
+  /** Tool call ID for correlating calls with results */
+  callId?: string;
+  /** Alternative tool call ID (Vercel style) */
+  toolCallId?: string;
+  /** Whether tool result is an error */
+  isError?: boolean;
+  /** Error text for tool errors */
+  errorText?: string;
+
+  // Phase/workflow status fields
+  /** Current workflow phase */
+  phase?: string;
+  /** Runtime status (RUNNING, COMPLETED, etc.) */
+  runtimeStatus?: string;
+
+  // Agent/handoff fields
+  /** Agent name for handoff events */
+  agentName?: string;
+  /** Whether approval was granted */
+  approved?: boolean;
+
+  // File change fields
+  /** File path for file_changed events */
+  filePath?: string;
+  /** Operation type (create, modify, delete) */
+  operation?: string;
+
+  // Task/plan fields
+  /** Task data for task_created events */
+  task?: TaskData;
+  /** Task ID for task_updated events */
+  taskId?: string;
+  /** Task status for task_updated events */
+  taskStatus?: "pending" | "in_progress" | "completed";
+
+  // AI SDK part fields (for "part" events)
+  /** Part type (text, reasoning, dynamic-tool) */
+  type?: string;
+  /** Part state for dynamic-tool parts */
+  state?: string;
+
+  // Context fields
+  /** LLM call metadata */
+  llm_call?: unknown;
+  /** Activity metadata */
+  activity?: unknown;
+
   /** Additional metadata */
   metadata?: Record<string, unknown>;
+
+  /** Allow additional fields for flexibility */
+  [key: string]: unknown;
 }
 
 /**
@@ -251,7 +314,7 @@ export function useWorkflowStream(
     [onStatusChange]
   );
 
-  // Add event to state (with deduplication)
+  // Add event to state
   const addEvent = useCallback(
     (event: WorkflowStreamEvent) => {
       const eventWithReceiveTime: WorkflowStreamEvent = {
@@ -260,11 +323,6 @@ export function useWorkflowStream(
       };
 
       setEvents((prev) => {
-        // Deduplicate by event ID
-        if (event.id && prev.some((e) => e.id === event.id)) {
-          return prev; // Skip duplicate event
-        }
-
         const newEvents = [...prev, eventWithReceiveTime];
         // Trim to max size
         if (newEvents.length > maxEvents) {
@@ -274,11 +332,9 @@ export function useWorkflowStream(
       });
 
       // Update specific state based on event type
-      // Backend sends llm_chunk with "text" field, but also support "content" for compatibility
-      if (event.type === "llm_chunk" && (event.data.text || event.data.content)) {
-        const chunkText = event.data.text || event.data.content || "";
-        setLatestChunk(chunkText);
-        setAccumulatedText((prev) => prev + chunkText);
+      if (event.type === "llm_chunk" && event.data.content) {
+        setLatestChunk(event.data.content);
+        setAccumulatedText((prev) => prev + event.data.content);
       } else if (event.type === "tool_call" && event.data.toolName) {
         setLatestToolCall({
           toolName: event.data.toolName,
@@ -456,34 +512,18 @@ export function getEventTypeLabel(type: WorkflowStreamEventType): string {
   switch (type) {
     case "initial":
       return "Initial State";
-    case "part":
-      return "AI Part";
     case "llm_chunk":
       return "LLM Response";
-    case "thinking":
-      return "Thinking";
     case "tool_call":
       return "Tool Call";
     case "tool_result":
       return "Tool Result";
-    case "file_changed":
-      return "File Changed";
     case "task_progress":
       return "Progress";
     case "task_completed":
       return "Completed";
-    case "task_created":
-      return "Task Created";
-    case "task_updated":
-      return "Task Updated";
-    case "plan_created":
-      return "Plan Started";
-    case "plan_complete":
-      return "Plan Complete";
     case "heartbeat":
       return "Heartbeat";
-    case "stream_timeout":
-      return "Stream Timeout";
     case "error":
       return "Error";
     default:
@@ -498,34 +538,18 @@ export function getEventTypeColor(type: WorkflowStreamEventType): string {
   switch (type) {
     case "initial":
       return "text-blue-600";
-    case "part":
-      return "text-cyan-600";
     case "llm_chunk":
       return "text-green-600";
-    case "thinking":
-      return "text-amber-600";
     case "tool_call":
       return "text-purple-600";
     case "tool_result":
       return "text-indigo-600";
-    case "file_changed":
-      return "text-pink-600";
     case "task_progress":
       return "text-yellow-600";
     case "task_completed":
       return "text-emerald-600";
-    case "task_created":
-      return "text-teal-600";
-    case "task_updated":
-      return "text-sky-600";
-    case "plan_created":
-      return "text-violet-600";
-    case "plan_complete":
-      return "text-lime-600";
     case "heartbeat":
       return "text-gray-400";
-    case "stream_timeout":
-      return "text-orange-500";
     case "error":
       return "text-red-600";
     default:
@@ -533,8 +557,12 @@ export function getEventTypeColor(type: WorkflowStreamEventType): string {
   }
 }
 
+// ============================================================================
+// Task and Plan Helpers
+// ============================================================================
+
 /**
- * Check if a tool name is a task-related tool
+ * Check if a tool name is a task management tool
  */
 export function isTaskTool(toolName: string): boolean {
   const taskTools = ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet"];
@@ -542,9 +570,25 @@ export function isTaskTool(toolName: string): boolean {
 }
 
 /**
- * Check if a tool name is a plan-related tool
+ * Check if a tool name is a plan management tool
  */
 export function isPlanTool(toolName: string): boolean {
   const planTools = ["EnterPlanMode", "ExitPlanMode"];
   return planTools.includes(toolName);
+}
+
+/**
+ * Check if a tool name is a thinking/reasoning tool
+ */
+export function isThinkTool(toolName: string): boolean {
+  const thinkTools = ["think", "reasoning", "chain_of_thought"];
+  return thinkTools.includes(toolName.toLowerCase());
+}
+
+/**
+ * Check if a tool name is a plan drafting tool
+ */
+export function isDraftPlanTool(toolName: string): boolean {
+  const draftPlanTools = ["draft_plan", "draftPlan", "create_plan", "plan"];
+  return draftPlanTools.includes(toolName) || toolName.toLowerCase() === "draft_plan";
 }

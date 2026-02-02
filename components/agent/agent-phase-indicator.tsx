@@ -85,6 +85,7 @@ export function derivePhaseFromEvents(events: WorkflowStreamEvent[]): AgentPhase
   const isCompleted = events.some(
     (e) =>
       e.type === "task_completed" &&
+      e.data &&
       (e.data.metadata as Record<string, unknown>)?.workflowComplete === true
   );
   if (isCompleted) return "completed";
@@ -92,6 +93,9 @@ export function derivePhaseFromEvents(events: WorkflowStreamEvent[]): AgentPhase
   // Look for status messages in events (from Dapr workflow customStatus)
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
+    // Skip events without data
+    if (!event.data) continue;
+
     const status = (
       event.data.status ||
       event.data.content ||
@@ -142,6 +146,7 @@ export function derivePhaseFromEvents(events: WorkflowStreamEvent[]): AgentPhase
     // Check for execution-related tool calls (Write, Edit to source files)
     const hasExecutionTools = events.some((e) => {
       if (e.type !== "tool_call" && e.type !== "tool_result") return false;
+      if (!e.data) return false;
       const toolName = (e.data.toolName || "").toLowerCase();
       const toolInput = e.data.toolInput as Record<string, unknown> | undefined;
       const filePath = (toolInput?.path || toolInput?.file_path || "") as string;
@@ -170,7 +175,7 @@ export function derivePhaseFromEvents(events: WorkflowStreamEvent[]): AgentPhase
 
   // Check initial event status
   const initialEvent = events.find((e) => e.type === "initial");
-  if (initialEvent) {
+  if (initialEvent && initialEvent.data) {
     const initialStatus = (initialEvent.data as Record<string, unknown>)
       ?.status as string;
     if (initialStatus === "AWAITING_APPROVAL") {

@@ -29,7 +29,7 @@ import {
   CheckCircle2Icon,
 } from "lucide-react";
 import type { WorkflowStreamEvent, TaskData } from "@/hooks/use-workflow-stream";
-import { isTaskTool, isPlanTool } from "@/hooks/use-workflow-stream";
+import { isTaskTool, isPlanTool, isThinkTool, isDraftPlanTool } from "@/hooks/use-workflow-stream";
 import type { TextUIPart, ReasoningUIPart, DynamicToolUIPart } from "ai";
 import { AgentTaskCard } from "./agent-task-card";
 import { AgentPlanCard, type PlanStatus } from "./agent-plan-card";
@@ -47,6 +47,15 @@ import {
   ReasoningTrigger,
   ReasoningContent,
 } from "@/components/ai-elements/reasoning";
+import {
+  Plan,
+  PlanHeader,
+  PlanTitle,
+  PlanDescription,
+  PlanContent,
+  PlanTrigger,
+  PlanAction,
+} from "@/components/ai-elements/plan";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
 import type { BundledLanguage } from "shiki";
 import { Loader } from "@/components/ai-elements/loader";
@@ -715,7 +724,17 @@ const ActivityCard = memo(function ActivityCard({ item, tasks = [] }: ActivityCa
     case "text":
       return <TextCard content={item.content || ""} />;
     case "tool_call":
-    case "tool_result":
+    case "tool_result": {
+      // Check for specialized tool rendering
+      const toolName = item.toolName || "";
+      if (isThinkTool(toolName)) {
+        return <LegacyThinkToolCard item={item} />;
+      }
+      if (isDraftPlanTool(toolName)) {
+        return <LegacyDraftPlanToolCard item={item} tasks={tasks} />;
+      }
+      return <ToolCard item={item} />;
+    }
     case "file_changed":
       return <ToolCard item={item} />;
     case "progress":
@@ -758,6 +777,14 @@ const PartCard = memo(function PartCard({ part, tasks = [] }: { part: AgentUIPar
   }
 
   if (isDynamicToolPart(part)) {
+    // Check for think tool - render with Reasoning component
+    if (isThinkTool(part.toolName)) {
+      return <ThinkToolCard part={part} />;
+    }
+    // Check for draft_plan tool - render with Plan component
+    if (isDraftPlanTool(part.toolName)) {
+      return <DraftPlanToolCard part={part} tasks={tasks} />;
+    }
     // Check if this is a task/plan tool - render with specialized UI
     if (isTaskTool(part.toolName)) {
       return <TaskToolCard part={part} tasks={tasks} />;
@@ -870,6 +897,140 @@ const DynamicToolCard = memo(function DynamicToolCard({ part }: { part: DynamicT
 });
 
 /**
+ * Think tool card - renders thinking/reasoning content using Reasoning component
+ */
+const ThinkToolCard = memo(function ThinkToolCard({ part }: { part: DynamicToolUIPart }) {
+  const input = part.input as Record<string, unknown> | unknown[] | undefined;
+  const isComplete = part.state === "output-available" || part.state === "output-error";
+
+  // Extract thinking content from input (first array element or direct content)
+  let thinkingContent: string;
+  if (Array.isArray(input)) {
+    thinkingContent = String(input[0] || "");
+  } else if (input && typeof input === "object") {
+    thinkingContent = String(
+      input.content || input.thought || input.reasoning || JSON.stringify(input, null, 2)
+    );
+  } else {
+    thinkingContent = String(input || "");
+  }
+
+  return (
+    <div className="flex gap-3">
+      <div className="flex-shrink-0">
+        <div className="size-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+          <BotIcon className="size-4 text-white" />
+        </div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <Reasoning
+          isStreaming={part.state === "input-streaming"}
+          defaultOpen={!isComplete}
+        >
+          <ReasoningTrigger />
+          <ReasoningContent>{thinkingContent}</ReasoningContent>
+        </Reasoning>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Draft plan tool card - renders plan using Plan component
+ */
+const DraftPlanToolCard = memo(function DraftPlanToolCard({
+  part,
+  tasks: aggregatedTasks,
+}: {
+  part: DynamicToolUIPart;
+  tasks: TaskData[];
+}) {
+  const input = part.input as Record<string, unknown> | unknown[] | undefined;
+  const isStreaming = part.state === "input-streaming" || part.state === "input-available";
+
+  // Parse plan content from input
+  let planTasks: Array<{ id: string; subject: string; description: string }> = [];
+  let planSummary = "";
+
+  if (Array.isArray(input)) {
+    // Input is array - first element is summary, rest may have embedded tasks
+    planSummary = String(input[0] || "");
+
+    // Try to extract tasks from the summary if it contains JSON
+    try {
+      const jsonMatch = planSummary.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        planTasks = JSON.parse(jsonMatch[0]);
+      }
+    } catch {
+      // Use tasks from aggregation instead
+      planTasks = aggregatedTasks.map((t) => ({
+        id: t.id,
+        subject: t.subject,
+        description: t.description,
+      }));
+    }
+  } else if (input?.tasks && Array.isArray(input.tasks)) {
+    planTasks = input.tasks as Array<{ id: string; subject: string; description: string }>;
+    planSummary = String(input.summary || input.description || "");
+  }
+
+  // Fallback to aggregated tasks if none found in input
+  if (planTasks.length === 0 && aggregatedTasks.length > 0) {
+    planTasks = aggregatedTasks.map((t) => ({
+      id: t.id,
+      subject: t.subject,
+      description: t.description,
+    }));
+  }
+
+  return (
+    <div className="ml-11">
+      <Plan isStreaming={isStreaming} defaultOpen={true}>
+        <PlanHeader>
+          <div className="flex-1">
+            <PlanTitle>Implementation Plan</PlanTitle>
+            {planSummary && (
+              <PlanDescription>{planSummary.slice(0, 200)}</PlanDescription>
+            )}
+          </div>
+          <PlanAction>
+            <PlanTrigger />
+          </PlanAction>
+        </PlanHeader>
+        <PlanContent>
+          <div className="space-y-2">
+            {planTasks.map((task, index) => (
+              <div
+                key={task.id || index}
+                className="flex gap-3 p-2 rounded-lg bg-muted/30"
+              >
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
+                  {index + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{task.subject}</p>
+                  {task.description && (
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                      {task.description}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+            {planTasks.length === 0 && (
+              <div className="text-sm text-muted-foreground italic">
+                No tasks defined yet...
+              </div>
+            )}
+          </div>
+        </PlanContent>
+      </Plan>
+    </div>
+  );
+});
+
+/**
  * Thinking card - Claude's internal reasoning (extended thinking)
  * Displayed expanded by default for better visibility
  */
@@ -942,6 +1103,130 @@ const StreamingReasoning = memo(function StreamingReasoning({
           <ReasoningContent>{content}</ReasoningContent>
         </Reasoning>
       </div>
+    </div>
+  );
+});
+
+/**
+ * Legacy think tool card - renders thinking content using Reasoning component
+ * Handles tool_call/tool_result events with toolName="think"
+ */
+const LegacyThinkToolCard = memo(function LegacyThinkToolCard({ item }: { item: ActivityItem }) {
+  const isComplete = item.status === "completed" || item.status === "error";
+
+  // Extract thinking content from toolInput (usually an array with first element being the thought)
+  let thinkingContent: string;
+  if (Array.isArray(item.toolInput)) {
+    thinkingContent = String(item.toolInput[0] || "");
+  } else if (item.toolInput && typeof item.toolInput === "object") {
+    const input = item.toolInput as Record<string, unknown>;
+    thinkingContent = String(input.content || input.thought || input.reasoning || JSON.stringify(input, null, 2));
+  } else {
+    thinkingContent = String(item.toolInput || "");
+  }
+
+  return (
+    <div className="flex gap-3">
+      <div className="flex-shrink-0">
+        <div className="size-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+          <BotIcon className="size-4 text-white" />
+        </div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <Reasoning
+          isStreaming={item.status === "running"}
+          defaultOpen={!isComplete}
+        >
+          <ReasoningTrigger />
+          <ReasoningContent>{thinkingContent}</ReasoningContent>
+        </Reasoning>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Legacy draft_plan tool card - renders plan using Plan component
+ * Handles tool_call/tool_result events with toolName="draft_plan"
+ */
+const LegacyDraftPlanToolCard = memo(function LegacyDraftPlanToolCard({
+  item,
+  tasks = [],
+}: {
+  item: ActivityItem;
+  tasks?: TaskData[];
+}) {
+  const isComplete = item.status === "completed";
+  const isStreaming = item.status === "running";
+
+  // Parse plan content from toolInput
+  let planSummary = "";
+  let planTasks: Array<{ id: string; subject: string; description: string }> = [];
+
+  if (Array.isArray(item.toolInput)) {
+    planSummary = String(item.toolInput[0] || "");
+    // Try to extract tasks from the summary if it contains JSON
+    try {
+      const jsonMatch = planSummary.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        planTasks = JSON.parse(jsonMatch[0]);
+      }
+    } catch {
+      // Use tasks from aggregation instead
+    }
+  } else if (item.toolInput && typeof item.toolInput === "object") {
+    const input = item.toolInput as Record<string, unknown>;
+    if (input.tasks && Array.isArray(input.tasks)) {
+      planTasks = input.tasks as typeof planTasks;
+    }
+    planSummary = String(input.summary || input.description || "");
+  }
+
+  // Fallback to aggregated tasks if none found in input
+  if (planTasks.length === 0 && tasks.length > 0) {
+    planTasks = tasks.map(t => ({ id: t.id, subject: t.subject, description: t.description }));
+  }
+
+  return (
+    <div className="ml-11">
+      <Plan isStreaming={isStreaming} defaultOpen={true}>
+        <PlanHeader>
+          <div className="flex-1">
+            <PlanTitle>Implementation Plan</PlanTitle>
+            {planSummary && (
+              <PlanDescription>{planSummary.slice(0, 200)}</PlanDescription>
+            )}
+          </div>
+          <PlanAction>
+            <PlanTrigger />
+          </PlanAction>
+        </PlanHeader>
+        <PlanContent>
+          <div className="space-y-2">
+            {planTasks.length > 0 ? (
+              planTasks.map((task, index) => (
+                <div key={task.id || index} className="flex gap-3 p-2 rounded-lg bg-muted/30">
+                  <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
+                    {index + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{task.subject}</p>
+                    {task.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                        {task.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {item.toolOutput || "Planning..."}
+              </p>
+            )}
+          </div>
+        </PlanContent>
+      </Plan>
     </div>
   );
 });

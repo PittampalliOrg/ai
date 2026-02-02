@@ -106,17 +106,19 @@ export function extractToolHistory(events: WorkflowStreamEvent[]): ToolHistoryIt
       if (callId) {
         const pending = pendingCalls.get(callId);
         if (pending) {
-          pending.toolOutput = event.data.toolOutput || event.data.result;
+          const output = event.data.toolOutput ?? event.data.result;
+          pending.toolOutput = typeof output === "string" ? output : JSON.stringify(output);
           pending.status = event.data.error || event.data.isError ? "error" : "success";
           pending.endTime = new Date(event.timestamp);
           pending.duration = pending.endTime.getTime() - pending.startTime.getTime();
           pendingCalls.delete(callId);
         } else if (event.data.toolName) {
           // Result without matching call - add it anyway
+          const output = event.data.toolOutput ?? event.data.result;
           history.push({
             id: callId,
             toolName: event.data.toolName,
-            toolOutput: event.data.toolOutput || event.data.result,
+            toolOutput: typeof output === "string" ? output : JSON.stringify(output),
             status: event.data.error || event.data.isError ? "error" : "success",
             startTime: new Date(event.timestamp),
           });
@@ -125,7 +127,8 @@ export function extractToolHistory(events: WorkflowStreamEvent[]): ToolHistoryIt
         // Legacy: no callId, try to match by toolName (less reliable)
         const pending = pendingCalls.get(event.data.toolName);
         if (pending) {
-          pending.toolOutput = event.data.toolOutput || event.data.result;
+          const output = event.data.toolOutput ?? event.data.result;
+          pending.toolOutput = typeof output === "string" ? output : JSON.stringify(output);
           pending.status = event.data.error || event.data.isError ? "error" : "success";
           pending.endTime = new Date(event.timestamp);
           pending.duration = pending.endTime.getTime() - pending.startTime.getTime();

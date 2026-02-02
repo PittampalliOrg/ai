@@ -105,6 +105,33 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
     setDetailPanelOpen(false);
   }, []);
 
+  // Plan approval handlers
+  const handlePlanApprove = useCallback(async () => {
+    if (!workflowId) return;
+    try {
+      await fetch(`/api/workflows/${workflowId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved: true }),
+      });
+    } catch (error) {
+      console.error("Failed to approve plan:", error);
+    }
+  }, [workflowId]);
+
+  const handlePlanReject = useCallback(async () => {
+    if (!workflowId) return;
+    try {
+      await fetch(`/api/workflows/${workflowId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved: false }),
+      });
+    } catch (error) {
+      console.error("Failed to reject plan:", error);
+    }
+  }, [workflowId]);
+
   return (
     <div className={cn("flex h-full", className)}>
       {/* Left: Summary Panel (400px fixed) */}
@@ -144,6 +171,8 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
             workflow={workflow}
             statusMessage={statusMessage}
             progress={progress}
+            onPlanApprove={handlePlanApprove}
+            onPlanReject={handlePlanReject}
           />
         </div>
       )}
@@ -177,7 +206,7 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
                   planSummary={workflow?.plan?.summary}
                   planSteps={workflow?.plan?.tasks?.map((t) => ({
                     id: t.id,
-                    title: t.subject || t.title,
+                    title: t.title,
                     description: t.description,
                   }))}
                 />

@@ -5,6 +5,21 @@ import { isDevelopmentEnvironment } from "./lib/constants";
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Get the proper external URL for redirects (respects X-Forwarded-* headers from ingress)
+  const getExternalUrl = (path: string = pathname) => {
+    const forwardedHost = request.headers.get("x-forwarded-host");
+    const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+
+    if (appUrl) {
+      return new URL(path, appUrl).toString();
+    }
+    if (forwardedHost) {
+      return `${forwardedProto}://${forwardedHost}${path}`;
+    }
+    return new URL(path, request.url).toString();
+  };
+
   /*
    * Playwright starts the dev server and requires a 200 status to
    * begin the tests, so this ensures that the tests can start
@@ -13,28 +28,25 @@ export async function proxy(request: NextRequest) {
     return new Response("pong", { status: 200 });
   }
 
-  if (pathname.startsWith("/api/auth")) {
-    return NextResponse.next();
-  }
-
   // Allow health endpoint through without authentication for K8s probes
   if (pathname.startsWith("/api/health")) {
     return NextResponse.next();
   }
 
-  // Allow Dapr endpoints through without authentication for service mesh communication
-  // This includes /dapr/* (subscription discovery), /api/dapr/*, and /api/webhooks/dapr/*
-  if (pathname.startsWith("/dapr") || pathname.startsWith("/api/dapr") || pathname.startsWith("/api/webhooks/dapr")) {
+  // Allow NextAuth API routes through
+  if (pathname.startsWith("/api/auth")) {
     return NextResponse.next();
   }
 
-  // Allow cron endpoints through without authentication for scheduled jobs
-  if (pathname.startsWith("/api/cron")) {
+  // Allow workflow-patterns API through for development testing
+  if (pathname.startsWith("/api/workflow-patterns")) {
     return NextResponse.next();
   }
 
-  // Public routes that don't require authentication
-  const isPublicRoute = ["/login", "/register"].includes(pathname);
+  // Allow login page without authentication
+  if (pathname === "/login") {
+    return NextResponse.next();
+  }
 
   const token = await getToken({
     req: request,
@@ -42,31 +54,16 @@ export async function proxy(request: NextRequest) {
     secureCookie: !isDevelopmentEnvironment,
   });
 
-  // Handle token refresh errors - redirect to login with error indicator
-  // Skip if already on login page to prevent redirect loop
-  if (token?.error === "RefreshTokenError" && !isPublicRoute) {
-    console.log("[Proxy] Token refresh error detected, redirecting to login");
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
-    loginUrl.searchParams.set("error", "session_expired");
-    return NextResponse.redirect(loginUrl);
-  }
-
-  // Redirect to login if not authenticated
+  // Redirect unauthenticated users to login page (GitHub OAuth)
   if (!token) {
-    // Allow public routes
-    if (isPublicRoute) {
-      return NextResponse.next();
-    }
-
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
+    const loginUrl = getExternalUrl("/login");
     return NextResponse.redirect(loginUrl);
   }
 
-  // Redirect authenticated users away from auth pages (only if no token error)
-  if (token && !token.error && isPublicRoute) {
-    return NextResponse.redirect(new URL("/agent", request.url));
+  // Redirect authenticated users away from login/register pages
+  if (["/login", "/register"].includes(pathname)) {
+    const homeUrl = getExternalUrl("/");
+    return NextResponse.redirect(homeUrl);
   }
 
   return NextResponse.next();
@@ -76,8 +73,6 @@ export const config = {
   matcher: [
     "/",
     "/chat/:id",
-    "/agent",
-    "/agent/:id",
     "/api/:path*",
     "/login",
     "/register",

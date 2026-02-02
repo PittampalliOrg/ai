@@ -119,31 +119,14 @@ export function useWorkflow(
 // useWorkflowStatus Hook
 // ============================================================================
 
-/**
- * Workflow status response from planner-orchestrator (via status route proxy).
- * The status route maps the orchestrator's flat response into this nested format.
- */
-export interface WorkflowStatus {
-  success: boolean;
-  instance_id: string;
-  runtime_status: string | null;
-  custom_status: {
-    phase?: string;
-    progress?: number;
-    message?: string;
-    [key: string]: unknown;
-  } | null;
-  created_at: string | null;
-  last_updated_at: string | null;
-  error: string | null;
-}
-
-export interface UseWorkflowStatusReturn {
-  status: WorkflowStatus | null;
+export interface WorkflowStatusResponse {
   phase: string | null;
   progress: number | null;
   message: string | null;
   runtimeStatus: string | null;
+}
+
+export interface UseWorkflowStatusReturn extends WorkflowStatusResponse {
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
@@ -151,10 +134,8 @@ export interface UseWorkflowStatusReturn {
 }
 
 /**
- * Hook to fetch workflow status from the planner-orchestrator (via status route proxy).
- *
- * The orchestrator returns flat phase/progress/message fields, which the status
- * route maps into the nested custom_status format for backwards compatibility.
+ * Hook to fetch workflow status by instance ID
+ * Returns phase, progress, message, and runtime status
  *
  * @param instanceId - The workflow instance ID
  * @param refreshInterval - Refresh interval in milliseconds (default: 2000)
@@ -163,31 +144,24 @@ export function useWorkflowStatus(
   instanceId: string | null | undefined,
   refreshInterval = 2000
 ): UseWorkflowStatusReturn {
-  const { data, error, isLoading, mutate } = useSWR<WorkflowStatus>(
+  const { data, error, isLoading, mutate } = useSWR<WorkflowStatusResponse>(
     instanceId ? `/api/workflows/${encodeURIComponent(instanceId)}/status` : null,
     fetcher,
     {
       refreshInterval,
-      revalidateOnFocus: false,
+      revalidateOnFocus: true,
       dedupingInterval: 1000,
-      // Don't retry on error - status endpoint may not be available
-      errorRetryCount: 1,
-      errorRetryInterval: 5000,
     }
   );
 
-  // Extract commonly used fields
-  const customStatus = data?.custom_status;
-
   return {
-    status: data ?? null,
-    phase: customStatus?.phase ?? null,
-    progress: customStatus?.progress ?? null,
-    message: customStatus?.message ?? null,
-    runtimeStatus: data?.runtime_status ?? null,
+    phase: data?.phase ?? null,
+    progress: data?.progress ?? null,
+    message: data?.message ?? null,
+    runtimeStatus: data?.runtimeStatus ?? null,
     isLoading,
-    isError: !!error || (data?.success === false && !!data?.error),
-    error: error ?? (data?.success === false && data?.error ? new Error(data.error) : null),
+    isError: !!error,
+    error: error ?? null,
     mutate,
   };
 }

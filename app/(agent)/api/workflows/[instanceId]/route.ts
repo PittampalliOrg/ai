@@ -18,7 +18,8 @@ import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib
 import { getState } from "@/lib/dapr/client";
 
 // Custom state store for activities (used by planner-dapr-agent)
-const ACTIVITIES_STATE_STORE = "ai-chatbot-statestore";
+// Uses DAPR_STATE_STORE env var (set via Dapr configuration component)
+const ACTIVITIES_STATE_STORE = process.env.DAPR_STATE_STORE || "statestore";
 const ACTIVITIES_KEY_PREFIX = "workflow-pattern-";
 
 // Activity type from planner-dapr-agent
