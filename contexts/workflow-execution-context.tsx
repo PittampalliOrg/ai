@@ -173,16 +173,28 @@ function countLines(str: string | null): number {
 
 /**
  * Convert stream events to log entries
+ *
+ * Handles comprehensive event types from:
+ * - Claude Agent SDK (message_*, content_block_*, text_delta, thinking_delta)
+ * - OpenAI Agents SDK (tool_called, tool_output, handoff_*, agent_updated)
+ * - Vercel AI SDK (text-start, text-delta, tool-call-*, reasoning)
+ * - Planner-dapr-agent (status, execution_*, phase_completed)
  */
 function eventsToLogs(events: WorkflowStreamEvent[]): WorkflowLogEntry[] {
   const logs: WorkflowLogEntry[] = [];
 
   events.forEach((event) => {
-    switch (event.type) {
+    const eventType = event.type;
+    const data = event.data || {};
+
+    switch (eventType) {
+      // ========== LLM Text Streaming Events ==========
       case "llm_chunk":
+      case "text_delta":
+      case "text-delta":
+      case "content_block_delta":
         // LLM chunks are accumulated, we create log entries for significant content
-        if (event.data.content && event.data.content.length > 50) {
-          // Only log substantial chunks
+        if (data.content && data.content.length > 50) {
           const existingLog = logs.find(
             (l) => l.type === "llm" && l.agentId === event.agentId
           );
@@ -190,7 +202,7 @@ function eventsToLogs(events: WorkflowStreamEvent[]): WorkflowLogEntry[] {
             logs.push({
               id: event.id,
               type: "llm",
-              content: event.data.content,
+              content: data.content,
               timestamp: new Date(event.timestamp),
               agentId: event.agentId,
             });
@@ -198,50 +210,292 @@ function eventsToLogs(events: WorkflowStreamEvent[]): WorkflowLogEntry[] {
         }
         break;
 
+      case "message_start":
+      case "text-start":
+      case "content_block_start":
+        // Start of a new message/content block
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.content || data.status || "AI generating response...",
+          timestamp: new Date(event.timestamp),
+          agentId: event.agentId,
+        });
+        break;
+
+      case "message_stop":
+      case "message_delta":
+      case "text-end":
+      case "content_block_stop":
+        // End/update of message - only log if has meaningful content
+        if (data.content || data.status) {
+          logs.push({
+            id: event.id,
+            type: "progress",
+            content: data.content || data.status || "Response complete",
+            timestamp: new Date(event.timestamp),
+            status: "success",
+          });
+        }
+        break;
+
+      case "thinking_delta":
+      case "reasoning":
+        // Extended thinking/reasoning content
+        if (data.content && data.content.length > 20) {
+          logs.push({
+            id: event.id,
+            type: "llm",
+            content: `[Thinking] ${data.content}`,
+            timestamp: new Date(event.timestamp),
+            agentId: event.agentId,
+          });
+        }
+        break;
+
+      // ========== Tool Call Events ==========
       case "tool_call":
+      case "tool_called":
+      case "tool-call":
+      case "tool-call-streaming-start":
         logs.push({
           id: event.id,
           type: "tool_call",
-          content: `Running: ${event.data.toolName}`,
+          content: `Running: ${data.toolName || data.name || "tool"}`,
           timestamp: new Date(event.timestamp),
           agentId: event.agentId,
-          toolName: event.data.toolName,
-          toolInput: event.data.toolInput,
+          toolName: data.toolName || data.name,
+          toolInput: data.toolInput || data.input || data.arguments,
           status: "running",
         });
         break;
 
+      case "tool-call-delta":
+        // Incremental tool argument updates - skip unless significant
+        break;
+
       case "tool_result":
+      case "tool_output":
+      case "tool-result": {
+        const resultOutput = data.toolOutput ?? data.output ?? data.result;
+        const outputStr = typeof resultOutput === "string"
+          ? resultOutput
+          : resultOutput != null
+            ? JSON.stringify(resultOutput)
+            : "Completed";
         logs.push({
           id: event.id,
           type: "tool_result",
-          content: event.data.toolOutput || "Completed",
+          content: outputStr,
           timestamp: new Date(event.timestamp),
           agentId: event.agentId,
-          toolName: event.data.toolName,
-          toolOutput: event.data.toolOutput,
-          status: event.data.error ? "error" : "success",
+          toolName: data.toolName || data.name,
+          toolOutput: outputStr,
+          status: data.error ? "error" : "success",
         });
         break;
+      }
 
-      case "task_progress":
+      // ========== LLM Lifecycle Events ==========
+      case "llm_start": {
+        const llmContent = data.llm_call ?? data.content;
         logs.push({
           id: event.id,
           type: "progress",
-          content: event.data.status || "Progress update",
+          content: typeof llmContent === "string" ? llmContent : "LLM processing...",
           timestamp: new Date(event.timestamp),
-          progress: event.data.progress,
+          agentId: event.agentId,
+          status: "running",
+        });
+        break;
+      }
+
+      case "llm_end":
+        logs.push({
+          id: event.id,
+          type: "llm",
+          content: data.output || data.content || "LLM response complete",
+          timestamp: new Date(event.timestamp),
+          agentId: event.agentId,
+          status: "success",
         });
         break;
 
+      // ========== Activity Lifecycle Events ==========
+      case "activity_started": {
+        const activityContent = data.activity ?? data.content;
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: typeof activityContent === "string" ? activityContent : "Activity started",
+          timestamp: new Date(event.timestamp),
+          status: "running",
+        });
+        break;
+      }
+
+      case "activity_completed": {
+        const activityCompletedContent = data.activity ?? data.content;
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: typeof activityCompletedContent === "string" ? activityCompletedContent : "Activity completed",
+          timestamp: new Date(event.timestamp),
+          status: data.status === "failed" ? "error" : "success",
+        });
+        break;
+      }
+
+      // ========== Agent Lifecycle Events ==========
+      case "agent_started": {
+        const agentStartedContent = data.agent ?? data.content;
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: typeof agentStartedContent === "string" ? agentStartedContent : "Agent started",
+          timestamp: new Date(event.timestamp),
+          status: "running",
+        });
+        break;
+      }
+
+      case "agent_completed": {
+        const agentCompletedContent = data.agent ?? data.content;
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: typeof agentCompletedContent === "string" ? agentCompletedContent : "Agent completed",
+          timestamp: new Date(event.timestamp),
+          status: "success",
+        });
+        break;
+      }
+
+      // ========== Workflow/Task Progress Events ==========
+      case "task_progress":
+      case "start-step":
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.status || data.content || data.message || "Progress update",
+          timestamp: new Date(event.timestamp),
+          progress: data.progress,
+        });
+        break;
+
+      case "initial":
+      case "status":
+      case "execution_started":
+        // Handle initial/status workflow state events
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.content || data.message || data.status || "Workflow started",
+          timestamp: new Date(event.timestamp),
+          progress: data.progress,
+        });
+        break;
+
+      case "phase_started":
+        // Handle phase start events (cloning, planning, execution, testing)
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.phase ? `Starting phase: ${data.phase}` : (data.content || data.message || "Phase started"),
+          timestamp: new Date(event.timestamp),
+          status: "running",
+          progress: data.progress,
+        });
+        break;
+
+      case "task_completed":
+      case "execution_completed":
+      case "phase_completed":
+      case "finish-step":
+        // Handle workflow/task completion events
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.phase ? `Completed phase: ${data.phase}` : (data.status || data.content || data.message || "Task completed"),
+          timestamp: new Date(event.timestamp),
+          status: "success",
+          progress: data.progress,
+        });
+        break;
+
+      case "execution_failed":
+        logs.push({
+          id: event.id,
+          type: "error",
+          content: data.error || data.message || "Execution failed",
+          timestamp: new Date(event.timestamp),
+          status: "error",
+        });
+        break;
+
+      // ========== Agent/Handoff Events ==========
+      case "handoff_requested":
+      case "handoff_occured":
+      case "agent_updated":
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.content || data.status || `Agent handoff: ${data.agentName || "unknown"}`,
+          timestamp: new Date(event.timestamp),
+          agentId: event.agentId,
+        });
+        break;
+
+      // ========== MCP Events ==========
+      case "mcp_approval_requested":
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.content || "MCP approval requested",
+          timestamp: new Date(event.timestamp),
+        });
+        break;
+
+      case "mcp_approval_response":
+        logs.push({
+          id: event.id,
+          type: "progress",
+          content: data.content || `MCP approval: ${data.approved ? "approved" : "denied"}`,
+          timestamp: new Date(event.timestamp),
+          status: data.approved ? "success" : "error",
+        });
+        break;
+
+      // ========== Error Events ==========
       case "error":
         logs.push({
           id: event.id,
           type: "error",
-          content: event.data.error || "Unknown error",
+          content: data.error || data.message || "Unknown error",
           timestamp: new Date(event.timestamp),
           status: "error",
         });
+        break;
+
+      // ========== Keep-alive/Heartbeat Events ==========
+      case "heartbeat":
+      case "ping":
+      case "stream_done":
+        // Silently ignore keep-alive events
+        break;
+
+      // ========== Default Handler ==========
+      default:
+        // Handle any unknown event types as progress updates if they have content
+        if (data.content || data.status || data.message) {
+          logs.push({
+            id: event.id,
+            type: "progress",
+            content: data.content || data.status || data.message || `Event: ${eventType}`,
+            timestamp: new Date(event.timestamp),
+            progress: data.progress,
+          });
+        }
         break;
     }
   });
