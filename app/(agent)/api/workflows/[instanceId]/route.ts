@@ -15,6 +15,117 @@ import {
   initializeWorkflowPatternsRuntime,
 } from "@/lib/workflow-patterns/runtime";
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
+import { getState } from "@/lib/dapr/client";
+
+// Custom state store for activities (used by planner-dapr-agent)
+const ACTIVITIES_STATE_STORE = "ai-chatbot-statestore";
+const ACTIVITIES_KEY_PREFIX = "workflow-pattern-";
+
+// Activity type from planner-dapr-agent
+interface WorkflowActivity {
+  activityName: string;
+  status: "pending" | "running" | "completed" | "failed";
+  startTime?: string;
+  endTime?: string;
+  durationMs?: number;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+}
+
+// State store entry format from planner-dapr-agent
+interface WorkflowStateEntry {
+  id: string;
+  instanceId: string;
+  workflowName?: string;
+  workflowType?: string;
+  appId?: string;
+  status: string;
+  request?: { prompt: string; submittedAt: string };
+  input?: Record<string, unknown>;
+  execution?: {
+    currentTaskIndex: number;
+    completedTasks: string[];
+    failedTasks: string[];
+    skippedTasks: string[];
+    logs: ExecutionLog[];
+  };
+  activities?: WorkflowActivity[];
+  output?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+  error?: string;
+}
+
+/**
+ * Fetch activities from the custom state store (ai-chatbot-statestore)
+ * Returns activities stored by planner-dapr-agent for workflow visualization
+ */
+async function getActivitiesFromStateStore(instanceId: string): Promise<{
+  activities: WorkflowActivity[];
+  stateEntry: WorkflowStateEntry | null;
+}> {
+  try {
+    const { data } = await getState<WorkflowStateEntry>(
+      ACTIVITIES_STATE_STORE,
+      `${ACTIVITIES_KEY_PREFIX}${instanceId}`
+    );
+
+    if (data) {
+      console.log(`[Workflow Detail] Found activities in state store for ${instanceId}: ${data.activities?.length || 0} activities`);
+      return {
+        activities: data.activities || [],
+        stateEntry: data,
+      };
+    }
+    return { activities: [], stateEntry: null };
+  } catch (error) {
+    console.log(`[Workflow Detail] Could not fetch activities from state store:`, error);
+    return { activities: [], stateEntry: null };
+  }
+}
+
+/**
+ * Convert activities to execution logs format for graph visualization
+ */
+function activitiesToExecutionLogs(activities: WorkflowActivity[]): ExecutionLog[] {
+  const logs: ExecutionLog[] = [];
+
+  for (const activity of activities) {
+    if (activity.startTime) {
+      logs.push({
+        timestamp: activity.startTime,
+        taskId: activity.activityName,
+        event: "started",
+        message: `Starting: ${activity.activityName}`,
+        details: activity.input,
+      });
+    }
+
+    if (activity.status === "completed" && activity.endTime) {
+      logs.push({
+        timestamp: activity.endTime,
+        taskId: activity.activityName,
+        event: "completed",
+        message: `Completed: ${activity.activityName}`,
+        details: {
+          durationMs: activity.durationMs,
+          ...(activity.output || {}),
+        },
+      });
+    } else if (activity.status === "failed" && activity.endTime) {
+      logs.push({
+        timestamp: activity.endTime,
+        taskId: activity.activityName,
+        event: "failed",
+        message: `Failed: ${activity.activityName}`,
+        details: activity.output,
+      });
+    }
+  }
+
+  return logs;
+}
 
 // Workflow orchestrator service configuration
 const WORKFLOW_SERVICE_URL =
@@ -297,43 +408,34 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           // Ignore - details are optional
         }
 
-        // Build execution logs from activities if available
-        const activities = (details.activities || []) as Array<{
-          activityName: string;
-          status: string;
-          startTime?: string;
-          endTime?: string;
-          durationMs?: number;
-          durationFormatted?: string;
-          input?: Record<string, unknown>;
-          output?: Record<string, unknown>;
-        }>;
+        // Build execution logs from activities if available from HTTP endpoint
+        let activities = (details.activities || []) as WorkflowActivity[];
 
-        const executionLogs: ExecutionLog[] = [];
-        for (const activity of activities) {
-          if (activity.startTime) {
-            executionLogs.push({
-              timestamp: activity.startTime,
-              taskId: activity.activityName,
-              event: "started",
-              message: `Starting: ${activity.activityName}`,
-              // Store input directly in details for mapExecutionLogsToEvents to pick up
-              details: activity.input,
-            });
-          }
-          if (activity.endTime && activity.status === "completed") {
-            executionLogs.push({
-              timestamp: activity.endTime,
-              taskId: activity.activityName,
-              event: "completed",
-              message: `Completed: ${activity.activityName}`,
-              details: {
-                duration: activity.durationFormatted || `${activity.durationMs}ms`,
-                ...(activity.output || {}),
-              },
-            });
+        // If no activities from HTTP endpoint, try to fetch from custom state store
+        // This handles multi-step Dapr workflows that store activities in ai-chatbot-statestore
+        if (activities.length === 0) {
+          const { activities: stateActivities, stateEntry } = await getActivitiesFromStateStore(instanceId);
+          if (stateActivities.length > 0) {
+            activities = stateActivities;
+            console.log(`[Workflow Detail] Using ${activities.length} activities from state store for ${instanceId}`);
+
+            // Also update details with state store data if available
+            if (stateEntry) {
+              if (stateEntry.execution) {
+                details.execution = stateEntry.execution;
+              }
+              if (stateEntry.output) {
+                details.output = stateEntry.output;
+              }
+              if (stateEntry.status) {
+                details.status = stateEntry.status;
+              }
+            }
           }
         }
+
+        // Convert activities to execution logs
+        const executionLogs: ExecutionLog[] = activitiesToExecutionLogs(activities);
 
         // Parse output for plan details
         const rawOutput = data.output as Record<string, unknown> | null;
@@ -457,22 +559,39 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         };
       }
 
+      // Also try to get activities from custom state store for multi-step workflows
+      let finalExecution = execution;
+      const { activities: stateActivities, stateEntry } = await getActivitiesFromStateStore(instanceId);
+      if (stateActivities.length > 0) {
+        console.log(`[Workflow Detail] Enriching index data with ${stateActivities.length} activities from state store`);
+        const activityLogs = activitiesToExecutionLogs(stateActivities);
+
+        // Merge activity logs with existing execution logs
+        finalExecution = {
+          currentTaskIndex: activityLogs.filter(l => l.event === "completed").length,
+          completedTasks: activityLogs.filter(l => l.event === "completed").map(l => l.taskId),
+          failedTasks: activityLogs.filter(l => l.event === "failed").map(l => l.taskId),
+          skippedTasks: [],
+          logs: activityLogs,
+        };
+      }
+
       // Return index data as a workflow entry
       return NextResponse.json({
         workflow: {
           id: indexEntry.instanceId,
-          status: indexEntry.status.toUpperCase(),
+          status: stateEntry?.status?.toUpperCase() || indexEntry.status.toUpperCase(),
           createdAt: indexEntry.createdAt,
-          updatedAt: indexEntry.updatedAt,
+          updatedAt: stateEntry?.updatedAt || indexEntry.updatedAt,
           request: indexEntry.input ? {
             prompt: JSON.stringify(indexEntry.input),
             submittedAt: indexEntry.createdAt,
           } : undefined,
           plan,
-          execution,
-          workflowType: indexEntry.workflowType,
+          execution: finalExecution,
+          workflowType: stateEntry?.workflowName || indexEntry.workflowType,
           source: "patterns",
-          appId: "workflow-patterns",
+          appId: stateEntry?.appId || "workflow-patterns",
         } as WorkflowEntry & { workflowType?: string; source?: string; appId?: string },
       });
     }
