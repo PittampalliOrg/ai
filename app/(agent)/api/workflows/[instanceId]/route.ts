@@ -16,6 +16,7 @@ import {
 } from "@/lib/workflow-patterns/runtime";
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
 import { getState } from "@/lib/dapr/client";
+import { getConfig } from "@/lib/dapr/config-provider";
 
 // Custom state store for activities (used by planner-dapr-agent)
 // Uses DAPR_STATE_STORE env var (set via Dapr configuration component)
@@ -128,17 +129,15 @@ function activitiesToExecutionLogs(activities: WorkflowActivity[]): ExecutionLog
   return logs;
 }
 
-// Workflow orchestrator service configuration
-const WORKFLOW_SERVICE_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
+// Service URLs from Dapr Configuration (Azure App Config) with fallbacks
+const getWorkflowServiceUrl = () =>
+  getConfig("WORKFLOW_SERVICE_URL", "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80");
 
-// Planner orchestrator service configuration
-const PLANNER_SERVICE_URL =
-  process.env.PLANNER_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
+const getPlannerServiceUrl = () =>
+  getConfig("PLANNER_SERVICE_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
 
-// Planner Dapr Agent service configuration
-const PLANNER_DAPR_AGENT_URL =
-  process.env.PLANNER_DAPR_AGENT_URL || "http://planner-dapr-agent.planner-agent.svc.cluster.local:8000";
+const getPlannerDaprAgentUrl = () =>
+  getConfig("PLANNER_DAPR_AGENT_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
 
 // ============================================================================
 // Pattern Step Definitions
@@ -277,7 +276,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
   // First, try the workflow-orchestrator service
   try {
-    const workflowUrl = `${WORKFLOW_SERVICE_URL}/api/workflows/${instanceId}`;
+    const workflowUrl = `${getWorkflowServiceUrl()}/api/workflows/${instanceId}`;
     console.log(`[Workflow Detail] Fetching workflow from ${workflowUrl}`);
 
     const response = await fetch(workflowUrl, {
@@ -288,8 +287,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     });
 
     if (response.ok) {
-      const data = await response.json() as WorkflowEntry;
-      return NextResponse.json({ workflow: data });
+      const data = await response.json() as WorkflowEntry & { phase?: string };
+
+      // Map phase to appropriate status for UI
+      let displayStatus = data.status;
+      if (data.phase === "awaiting_approval") {
+        displayStatus = "AWAITING_APPROVAL" as WorkflowEntry["status"];
+      } else if (data.phase === "planning") {
+        displayStatus = "PLANNING" as WorkflowEntry["status"];
+      } else if (data.phase === "execution") {
+        displayStatus = "EXECUTING" as WorkflowEntry["status"];
+      } else if (data.phase === "testing") {
+        displayStatus = "TESTING" as WorkflowEntry["status"];
+      }
+
+      return NextResponse.json({ workflow: { ...data, status: displayStatus } });
     }
 
     // If not 404, it's a real error from orchestrator
@@ -312,7 +324,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   // Try planner-orchestrator (for planner-* and dapr-agent-* workflow IDs)
   if (instanceId.startsWith("planner-") || instanceId.startsWith("dapr-agent-")) {
     try {
-      const plannerUrl = `${PLANNER_SERVICE_URL}/api/workflows/${instanceId}/status`;
+      const plannerUrl = `${getPlannerServiceUrl()}/api/workflows/${instanceId}/status`;
       console.log(`[Workflow Detail] Fetching workflow from ${plannerUrl}`);
 
       const response = await fetch(plannerUrl, {
@@ -326,7 +338,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         // Also fetch tasks for the workflow
         let tasks: Array<{ id: string; subject: string; description: string; status: string }> = [];
         try {
-          const tasksResponse = await fetch(`${PLANNER_SERVICE_URL}/api/workflows/${instanceId}/tasks`);
+          const tasksResponse = await fetch(`${getPlannerServiceUrl()}/api/workflows/${instanceId}/tasks`);
           if (tasksResponse.ok) {
             const tasksData = await tasksResponse.json();
             tasks = tasksData.tasks || [];
@@ -387,7 +399,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   // Try planner-dapr-agent (for wf-* workflow IDs)
   if (instanceId.startsWith("wf-")) {
     try {
-      const daprAgentUrl = `${PLANNER_DAPR_AGENT_URL}/status/${instanceId}`;
+      // Use /workflows/{id} endpoint directly as it contains all the data
+      const daprAgentUrl = `${getPlannerDaprAgentUrl()}/workflows/${instanceId}`;
       console.log(`[Workflow Detail] Fetching workflow from ${daprAgentUrl}`);
 
       const response = await fetch(daprAgentUrl, {
@@ -396,75 +409,109 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as {
+          instanceId: string;
+          workflowName?: string;
+          status: string;
+          phase?: string;
+          progress?: number;
+          message?: string;
+          plan?: {
+            summary?: string;
+            tasks?: Array<{ id: string; subject: string; description: string; status: string; blockedBy?: string[]; blocks?: string[] }>;
+            tests?: Array<{ id: string; task_id: string; description: string; test_type: string; command?: string; expected?: string }>;
+            reasoning?: string;
+          };
+          activities?: WorkflowActivity[];
+          input?: { message?: string };
+          output?: Record<string, unknown>;
+          error?: string;
+          createdAt?: string;
+          updatedAt?: string;
+          completedAt?: string;
+        };
 
-        // Also get workflow details from /workflows/{id} endpoint
-        let details: Record<string, unknown> = {};
-        try {
-          const detailsResponse = await fetch(`${PLANNER_DAPR_AGENT_URL}/workflows/${instanceId}`);
-          if (detailsResponse.ok) {
-            details = await detailsResponse.json();
-          }
-        } catch {
-          // Ignore - details are optional
-        }
+        // Build execution logs from activities if available
+        let activities = (data.activities || []) as WorkflowActivity[];
 
-        // Build execution logs from activities if available from HTTP endpoint
-        let activities = (details.activities || []) as WorkflowActivity[];
-
-        // If no activities from HTTP endpoint, try to fetch from custom state store
-        // This handles multi-step Dapr workflows that store activities in ai-chatbot-statestore
+        // If no activities, try state store
         if (activities.length === 0) {
           const { activities: stateActivities, stateEntry } = await getActivitiesFromStateStore(instanceId);
           if (stateActivities.length > 0) {
             activities = stateActivities;
             console.log(`[Workflow Detail] Using ${activities.length} activities from state store for ${instanceId}`);
-
-            // Also update details with state store data if available
-            if (stateEntry) {
-              if (stateEntry.execution) {
-                details.execution = stateEntry.execution;
-              }
-              if (stateEntry.output) {
-                details.output = stateEntry.output;
-              }
-              if (stateEntry.status) {
-                details.status = stateEntry.status;
-              }
-            }
           }
         }
 
         // Convert activities to execution logs
         const executionLogs: ExecutionLog[] = activitiesToExecutionLogs(activities);
 
-        // Parse output for plan details
-        const rawOutput = data.output as Record<string, unknown> | null;
-        const planContent = rawOutput?.plan as string | undefined;
+        // Map phase to appropriate status for UI
+        // When phase is "awaiting_approval", use AWAITING_APPROVAL status
+        let displayStatus = data.status?.toUpperCase() || "UNKNOWN";
+        if (data.phase === "awaiting_approval") {
+          displayStatus = "AWAITING_APPROVAL";
+        } else if (data.phase === "planning") {
+          displayStatus = "PLANNING";
+        } else if (data.phase === "execution") {
+          displayStatus = "EXECUTING";
+        } else if (data.phase === "testing") {
+          displayStatus = "TESTING";
+        }
 
-        // Check if this is DaprAgentOutput format (has tasks, usage, or trace)
-        const isDaprAgentOutput = rawOutput && (
-          Array.isArray(rawOutput.tasks) ||
-          (rawOutput.usage && typeof rawOutput.usage === "object") ||
-          (rawOutput.trace && typeof rawOutput.trace === "object")
-        );
+        // Build plan from response - check both top-level and output.plan locations
+        const planData = data.plan || data.output?.plan;
+        const planTasks = planData?.tasks?.map(t => ({
+          id: t.id,
+          title: t.subject,
+          subject: t.subject,
+          description: t.description,
+          status: (t.status === "completed" ? "completed" :
+                  t.status === "in_progress" ? "in_progress" : "pending") as "pending" | "in_progress" | "completed",
+          blockedBy: t.blockedBy,
+          blocks: t.blocks,
+        })) || [];
 
-        const workflow: WorkflowEntry & { workflowType?: string; source?: string; appId?: string; daprAgentOutput?: unknown } = {
-          id: data.instance_id,
-          status: (data.status?.toUpperCase() || "UNKNOWN") as WorkflowEntry["status"],
-          createdAt: data.created_at || new Date().toISOString(),
-          updatedAt: details.updatedAt as string || new Date().toISOString(),
-          plan: planContent ? {
-            id: instanceId,
-            title: "Implementation Plan",
-            summary: planContent.slice(0, 200) + "...",
-            tasks: [{
-              id: "plan",
-              title: "Generated Plan",
-              description: planContent,
-              status: data.status === "completed" ? "completed" as const : "pending" as const,
-            }],
+        // Build full input/output from backend response for UI display
+        const rawInput = data.input;
+        const rawOutput = data.output;
+
+        const workflow: WorkflowEntry & {
+          workflowType?: string;
+          source?: string;
+          appId?: string;
+          customStatus?: { phase: string; progress: number; message: string };
+          daprAgentOutput?: unknown;
+        } = {
+          id: data.instanceId,
+          status: displayStatus as WorkflowEntry["status"],
+          createdAt: data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || new Date().toISOString(),
+          // Populate request field from input for toWorkflowDetail transform
+          request: rawInput?.message ? {
+            prompt: rawInput.message,
+            submittedAt: data.createdAt || new Date().toISOString(),
           } : undefined,
+          plan: planTasks.length > 0 ? {
+            id: instanceId,
+            title: rawInput?.message || "Implementation Plan",
+            summary: planData?.summary || "",
+            tasks: planTasks,
+          } : (planData ? {
+            id: instanceId,
+            title: rawInput?.message || "Implementation Plan",
+            summary: planData.summary || "",
+            tasks: planData.tasks?.map(t => ({
+              id: t.id,
+              title: t.subject,
+              subject: t.subject,
+              description: t.description,
+              status: (t.status === "completed" ? "completed" :
+                      t.status === "in_progress" ? "in_progress" : "pending") as "pending" | "in_progress" | "completed",
+              blockedBy: t.blockedBy,
+              blocks: t.blocks,
+            })) || [],
+          } : undefined),
           execution: {
             currentTaskIndex: executionLogs.filter(l => l.event === "completed").length,
             completedTasks: executionLogs.filter(l => l.event === "completed").map(l => l.taskId),
@@ -472,11 +519,22 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
             skippedTasks: [],
             logs: executionLogs,
           },
-          workflowType: "planner_workflow",
+          workflowType: data.workflowName || "multi_step_workflow",
           source: "dapr-agent",
           appId: "planner-dapr-agent",
-          // Preserve raw DaprAgentOutput for UI detection
-          daprAgentOutput: isDaprAgentOutput ? rawOutput : undefined,
+          // Add custom status for phase display in the table
+          customStatus: data.phase ? {
+            phase: data.phase,
+            progress: data.progress || 0,
+            message: data.message || "",
+          } : undefined,
+          // Pass through raw output for advanced UI display
+          daprAgentOutput: rawOutput ? {
+            ...rawOutput,
+            input: rawInput,
+            plan: planData,
+            activities: activities,
+          } : undefined,
         };
 
         return NextResponse.json({ workflow });

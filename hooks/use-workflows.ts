@@ -134,6 +134,46 @@ export interface UseWorkflowStatusReturn extends WorkflowStatusResponse {
 }
 
 /**
+ * API response from status endpoint has nested structure
+ */
+interface WorkflowStatusAPIResponse {
+  success: boolean;
+  instance_id: string;
+  runtime_status: string | null;
+  custom_status: {
+    phase?: string;
+    progress?: number;
+    message?: string;
+    [key: string]: unknown;
+  } | null;
+  created_at: string | null;
+  last_updated_at: string | null;
+  error: string | null;
+}
+
+/**
+ * Custom fetcher that transforms nested API response to flat format
+ */
+const statusFetcher = async (url: string): Promise<WorkflowStatusResponse> => {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || `Failed to fetch: ${response.statusText}`);
+  }
+
+  const data: WorkflowStatusAPIResponse = await response.json();
+
+  // Transform nested structure to flat format expected by hook consumers
+  return {
+    phase: data.custom_status?.phase ?? null,
+    progress: data.custom_status?.progress ?? null,
+    message: data.custom_status?.message ?? null,
+    runtimeStatus: data.runtime_status ?? null,
+  };
+};
+
+/**
  * Hook to fetch workflow status by instance ID
  * Returns phase, progress, message, and runtime status
  *
@@ -146,7 +186,7 @@ export function useWorkflowStatus(
 ): UseWorkflowStatusReturn {
   const { data, error, isLoading, mutate } = useSWR<WorkflowStatusResponse>(
     instanceId ? `/api/workflows/${encodeURIComponent(instanceId)}/status` : null,
-    fetcher,
+    statusFetcher,
     {
       refreshInterval,
       revalidateOnFocus: true,

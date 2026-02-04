@@ -24,13 +24,23 @@ type StatusConfig = {
   ring?: string;
 };
 
-const statusConfigs: Record<WorkflowNodeData["status"], StatusConfig> = {
+const statusConfigs: Record<string, StatusConfig> = {
   start: {
     bg: "bg-blue-500/20",
     border: "border-blue-500",
     icon: <Play className="h-4 w-4 text-blue-400" />,
   },
   pending: {
+    bg: "bg-muted",
+    border: "border-muted-foreground/30",
+    icon: <Clock className="h-4 w-4 text-muted-foreground" />,
+  },
+  not_started: {
+    bg: "bg-muted",
+    border: "border-muted-foreground/30",
+    icon: <Clock className="h-4 w-4 text-muted-foreground" />,
+  },
+  planned: {
     bg: "bg-muted",
     border: "border-muted-foreground/30",
     icon: <Clock className="h-4 w-4 text-muted-foreground" />,
@@ -67,9 +77,15 @@ type WorkflowNodeComponentProps = NodeProps<WorkflowNodeType>;
 /**
  * Custom node component for workflow visualization
  */
+const defaultConfig: StatusConfig = {
+  bg: "bg-muted",
+  border: "border-muted-foreground/30",
+  icon: <Clock className="h-4 w-4 text-muted-foreground" />,
+};
+
 function WorkflowNodeComponent({ data }: WorkflowNodeComponentProps) {
   const nodeData = data as WorkflowNodeData;
-  const config = statusConfigs[nodeData.status];
+  const config = statusConfigs[nodeData.status] || defaultConfig;
 
   return (
     <>

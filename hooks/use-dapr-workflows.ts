@@ -14,6 +14,7 @@ import type {
   WorkflowListItem,
   WorkflowDetail,
   WorkflowFilters,
+  WorkflowCustomStatus,
 } from "@/lib/types/workflow-ui";
 import { toWorkflowDetail, applyWorkflowFilters } from "@/lib/transforms/workflow-ui";
 
@@ -138,6 +139,7 @@ interface WorkflowDetailAPIResponse {
     source?: string;
     appId?: string;
     daprAgentOutput?: unknown;
+    customStatus?: WorkflowCustomStatus;
   };
 }
 

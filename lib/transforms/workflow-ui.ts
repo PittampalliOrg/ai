@@ -626,20 +626,35 @@ export function toWorkflowDetail(
 ): WorkflowDetail {
   const listItem = toWorkflowListItem(workflow);
 
-  // Build input object from request - show full request data
-  const input = workflow.request
-    ? {
-        instanceId: workflow.id,
-        input: {
-          prompt: workflow.request.prompt,
-          submittedAt: workflow.request.submittedAt,
-          submittedBy: workflow.request.submittedBy || undefined,
-          options: workflow.request.options || undefined,
-        },
-      }
-    : { instanceId: workflow.id };
+  // Extract raw data from daprAgentOutput if available (for planner-dapr-agent workflows)
+  const rawAgentOutput = workflow.daprAgentOutput as Record<string, unknown> | undefined;
+  const rawInput = rawAgentOutput?.input as Record<string, unknown> | undefined;
+
+  // Build input object from request OR from daprAgentOutput - show full request data
+  let input: unknown;
+  if (workflow.request) {
+    input = {
+      instanceId: workflow.id,
+      input: {
+        prompt: workflow.request.prompt,
+        submittedAt: workflow.request.submittedAt,
+        submittedBy: workflow.request.submittedBy || undefined,
+        options: workflow.request.options || undefined,
+      },
+    };
+  } else if (rawInput) {
+    // Fallback to daprAgentOutput.input for planner-dapr-agent workflows
+    input = {
+      instanceId: workflow.id,
+      message: rawInput.message,
+      ...rawInput,
+    };
+  } else {
+    input = { instanceId: workflow.id };
+  }
 
   // Build output object from plan and execution
+  // For planner-dapr-agent workflows, include more comprehensive data
   const output = {
     id: workflow.id,
     status: workflow.status,
@@ -648,15 +663,23 @@ export function toWorkflowDetail(
           prompt: workflow.request.prompt,
           submittedAt: workflow.request.submittedAt,
         }
-      : null,
+      : rawInput?.message
+        ? {
+            message: rawInput.message,
+          }
+        : null,
     plan: workflow.plan
       ? {
           id: workflow.plan.id,
           title: workflow.plan.title,
           summary: workflow.plan.summary,
           taskCount: workflow.plan.tasks?.length || 0,
+          // Include full tasks for planner-dapr-agent workflows
+          tasks: workflow.plan.tasks,
         }
-      : null,
+      : rawAgentOutput?.plan
+        ? rawAgentOutput.plan
+        : null,
     approval: workflow.approval || null,
     execution: workflow.execution
       ? {
@@ -676,7 +699,7 @@ export function toWorkflowDetail(
     listItem.endTime,
     workflow.status,
     workflow.plan?.tasks,
-    workflow.request ? { prompt: workflow.request.prompt } : undefined
+    workflow.request ? { prompt: workflow.request.prompt } : (rawInput || undefined)
   );
 
   // Check if daprAgentOutput is valid DaprAgentOutput format

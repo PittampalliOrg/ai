@@ -7,7 +7,7 @@
  * Uses AgentActivityTab for rich AI Elements rendering of workflow events.
  */
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -72,6 +72,10 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
 }: AgentDetailPanelProps) {
   // Use task aggregation to determine plan status for the activity tab
   const { planStatus } = useTaskAggregation(events);
+
+  // State for selected file in diff view
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+
   return (
     <div className="flex h-full flex-col bg-background">
       {/* Tab Header */}
@@ -134,6 +138,7 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
             accumulatedText={accumulatedText}
             isStreaming={isStreaming}
             planStatus={planStatus}
+            isAwaitingApproval={isAwaitingApproval}
             onPlanApprove={onPlanApprove}
             onPlanReject={onPlanReject}
             className="h-full"
@@ -143,8 +148,8 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
             <DiffView
               fileChanges={fileChanges}
               fileChangeArray={fileChangeArray}
-              selectedFile={null}
-              onFileSelect={() => {}}
+              selectedFile={selectedFile}
+              onFileSelect={setSelectedFile}
             />
           </ScrollArea>
         )}

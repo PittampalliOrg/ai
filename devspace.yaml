@@ -178,12 +178,10 @@ dev:
       localPort: 2222
 
     # Environment variables for development
+    # Note: Most config values come from Dapr Configuration (Azure App Config)
+    # Only set dev-specific overrides here that aren't in app config
     env:
       - name: NODE_ENV
         value: development
       - name: NEXT_TELEMETRY_DISABLED
         value: "1"
-      - name: OTEL_SERVICE_NAME
-        value: ${OTEL_SERVICE_NAME}
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: "deployment.environment=${OTEL_ENVIRONMENT},service.namespace=${APP_NAME}-dev,service.version=dev"

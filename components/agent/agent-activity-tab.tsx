@@ -19,7 +19,7 @@
  * are also supported.
  */
 
-import { memo, useMemo, useRef, useEffect, useState } from "react";
+import React, { memo, useMemo, useRef, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   BotIcon,
@@ -27,12 +27,22 @@ import {
   AlertCircleIcon,
   CircleIcon,
   CheckCircle2Icon,
+  PauseCircleIcon,
+  ListChecksIcon,
+  XCircleIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  FlaskConicalIcon,
+  CodeIcon,
+  GitBranchIcon,
+  ClipboardListIcon,
 } from "lucide-react";
 import type { WorkflowStreamEvent, TaskData } from "@/hooks/use-workflow-stream";
 import { isTaskTool, isPlanTool, isThinkTool, isDraftPlanTool } from "@/hooks/use-workflow-stream";
 import type { TextUIPart, ReasoningUIPart, DynamicToolUIPart } from "ai";
 import { AgentTaskCard } from "./agent-task-card";
 import { AgentPlanCard, type PlanStatus } from "./agent-plan-card";
+import { ToolGroupCard } from "./tool-group-card";
 
 // AI Elements imports
 import {
@@ -68,6 +78,8 @@ interface AgentActivityTabProps {
   className?: string;
   /** Current workflow/plan status for showing approval UI */
   planStatus?: PlanStatus;
+  /** Whether the workflow is awaiting approval */
+  isAwaitingApproval?: boolean;
   /** Callback when user approves the plan */
   onPlanApprove?: () => void;
   /** Callback when user rejects the plan */
@@ -78,7 +90,7 @@ interface AgentActivityTabProps {
 type AgentUIPart = TextUIPart | ReasoningUIPart | DynamicToolUIPart;
 
 // Activity item types - supports both new AI SDK format and legacy format
-type ActivityType = "part" | "thinking" | "text" | "tool_call" | "tool_result" | "file_changed" | "progress" | "completed" | "error" | "task_created" | "task_updated" | "plan_created" | "plan_complete";
+type ActivityType = "part" | "thinking" | "text" | "tool_call" | "tool_result" | "file_changed" | "progress" | "completed" | "error" | "task_created" | "task_updated" | "plan_created" | "plan_complete" | "phase_started" | "phase_completed" | "phase_failed" | "test_retry";
 
 interface ActivityItem {
   id: string;
@@ -98,7 +110,41 @@ interface ActivityItem {
   status?: "running" | "success" | "error";
   callId?: string;
   agentId?: string;
+  // Phase event fields
+  phase?: string;
+  progress?: number;
+  // Phase completion statistics
+  tasksCount?: number;
+  testsCount?: number;
+  testsRun?: number;
+  testsPassed?: number;
+  testsFailed?: number;
+  passed?: boolean;
+  completedTasks?: string[];
+  // Test retry fields
+  attempt?: number;
+  maxRetries?: number;
 }
+
+/**
+ * Tool group for consecutive tool calls of the same type
+ */
+interface ToolGroup {
+  toolName: string;
+  items: ActivityItem[];
+  firstTimestamp: Date;
+  lastTimestamp: Date;
+  completedCount: number;
+  runningCount: number;
+  errorCount: number;
+}
+
+/**
+ * Grouped activity item - either a regular item or a tool group
+ */
+type GroupedActivityItem =
+  | ActivityItem
+  | { type: "tool_group"; toolGroup: ToolGroup; id: string };
 
 const TOOL_LABELS: Record<string, string> = {
   read: "Read File",
@@ -216,8 +262,10 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         break;
       }
 
-      // LEGACY: thinking events
+      // LEGACY: thinking events (both "thinking" and "thinking_delta" from backend)
       case "thinking":
+      case "thinking_delta":
+      case "reasoning":
         // If switching from a different type, flush first
         if (currentType !== "thinking") {
           flushCurrent();
@@ -229,8 +277,10 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         currentAgentId = event.agentId;
         break;
 
-      // LEGACY: llm_chunk events
+      // LEGACY: llm_chunk and message events
       case "llm_chunk":
+      case "message_start":
+      case "text_delta":
         // If switching from a different type, flush first
         if (currentType !== "llm_chunk") {
           flushCurrent();
@@ -422,6 +472,115 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         });
         break;
       }
+
+      // Phase lifecycle events
+      case "phase_started": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_started",
+          timestamp: new Date(event.timestamp),
+          phase: event.data.phase as string,
+          content: event.data.status as string || event.data.message as string,
+          progress: event.data.progress as number,
+          testsCount: event.data.tests_count as number,
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "phase_completed": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_completed",
+          timestamp: new Date(event.timestamp),
+          phase: event.data.phase as string,
+          content: event.data.status as string || event.data.message as string,
+          progress: event.data.progress as number,
+          tasksCount: event.data.tasks_count as number,
+          testsCount: event.data.tests_count as number,
+          testsRun: event.data.tests_run as number,
+          testsPassed: event.data.tests_passed as number,
+          testsFailed: event.data.tests_failed as number,
+          passed: event.data.passed as boolean,
+          completedTasks: event.data.completed_tasks as string[],
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "phase_failed": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_failed",
+          timestamp: new Date(event.timestamp),
+          phase: event.data.phase as string,
+          content: event.data.error as string || event.data.status as string,
+          status: "error",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "execution_started": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_started",
+          timestamp: new Date(event.timestamp),
+          phase: "execution",
+          content: event.data.status as string || "Starting execution...",
+          progress: event.data.progress as number,
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "execution_completed": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_completed",
+          timestamp: new Date(event.timestamp),
+          phase: "execution",
+          content: event.data.status as string || "Execution completed",
+          progress: event.data.progress as number,
+          passed: event.data.success as boolean,
+          completedTasks: event.data.completed_tasks as string[],
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "execution_failed": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_failed",
+          timestamp: new Date(event.timestamp),
+          phase: "execution",
+          content: event.data.error as string || "Execution failed",
+          status: "error",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "test_retry": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "test_retry",
+          timestamp: new Date(event.timestamp),
+          content: event.data.status as string,
+          attempt: event.data.attempt as number,
+          maxRetries: event.data.max_retries as number,
+          agentId: event.agentId,
+        });
+        break;
+      }
     }
   }
 
@@ -429,6 +588,164 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
   flushCurrent();
 
   return items;
+}
+
+/**
+ * Tools that should never be grouped (special tools with dedicated rendering)
+ */
+const NEVER_GROUP_TOOLS = new Set([
+  "think",
+  "draft_plan",
+  "taskcreate",
+  "taskupdate",
+  "enterplanmode",
+  "exitplanmode",
+]);
+
+/**
+ * Check if a tool should be excluded from grouping
+ */
+function shouldExcludeFromGrouping(toolName: string): boolean {
+  return NEVER_GROUP_TOOLS.has(toolName.toLowerCase());
+}
+
+/**
+ * Get the tool name from an activity item
+ */
+function getItemToolName(item: ActivityItem): string | null {
+  // For AI SDK part format
+  if (item.type === "part" && item.part && isDynamicToolPart(item.part)) {
+    return item.part.toolName;
+  }
+  // For legacy format
+  if (item.type === "tool_call" || item.type === "tool_result" || item.type === "file_changed") {
+    return item.toolName || null;
+  }
+  return null;
+}
+
+/**
+ * Get the status of a tool item
+ */
+function getItemStatus(item: ActivityItem): "running" | "success" | "error" {
+  // For AI SDK part format
+  if (item.type === "part" && item.part && isDynamicToolPart(item.part)) {
+    const state = item.part.state;
+    if (state === "input-available" || state === "input-streaming") return "running";
+    if (state === "output-error") return "error";
+    return "success";
+  }
+  // For legacy format
+  return item.status || "success";
+}
+
+/**
+ * Check if an item is a tool item that can be grouped
+ */
+function isGroupableTool(item: ActivityItem): boolean {
+  const toolName = getItemToolName(item);
+  if (!toolName) return false;
+  return !shouldExcludeFromGrouping(toolName);
+}
+
+/**
+ * Group consecutive tool calls of the same type
+ *
+ * Grouping rules:
+ * 1. Group consecutive tool calls with the same toolName
+ * 2. Break group on: different tool, thinking/reasoning, text output, >30s gap
+ * 3. Minimum 2 items to form a group (single items render normally)
+ * 4. Special tools never grouped: think, draft_plan, TaskCreate, TaskUpdate, EnterPlanMode, ExitPlanMode
+ */
+function groupActivityItems(items: ActivityItem[]): GroupedActivityItem[] {
+  const result: GroupedActivityItem[] = [];
+  let currentGroup: ActivityItem[] = [];
+  let currentToolName: string | null = null;
+  let lastTimestamp: Date | null = null;
+
+  const flushGroup = () => {
+    if (currentGroup.length === 0) return;
+
+    if (currentGroup.length === 1) {
+      // Single item - don't group
+      result.push(currentGroup[0]);
+    } else {
+      // Multiple items - create a group
+      let completedCount = 0;
+      let runningCount = 0;
+      let errorCount = 0;
+
+      for (const item of currentGroup) {
+        const status = getItemStatus(item);
+        if (status === "running") runningCount++;
+        else if (status === "error") errorCount++;
+        else completedCount++;
+      }
+
+      const toolGroup: ToolGroup = {
+        toolName: currentToolName!,
+        items: currentGroup,
+        firstTimestamp: currentGroup[0].timestamp,
+        lastTimestamp: currentGroup[currentGroup.length - 1].timestamp,
+        completedCount,
+        runningCount,
+        errorCount,
+      };
+
+      result.push({
+        type: "tool_group",
+        toolGroup,
+        id: `group-${currentToolName}-${currentGroup[0].id}`,
+      });
+    }
+
+    currentGroup = [];
+    currentToolName = null;
+    lastTimestamp = null;
+  };
+
+  const MAX_GAP_MS = 30000; // 30 seconds
+
+  for (const item of items) {
+    const toolName = getItemToolName(item);
+
+    // Non-tool items break the group
+    if (!toolName || !isGroupableTool(item)) {
+      flushGroup();
+      result.push(item);
+      continue;
+    }
+
+    // Check if we should continue the current group or start a new one
+    const shouldBreak =
+      currentToolName !== null &&
+      (toolName.toLowerCase() !== currentToolName.toLowerCase() ||
+        (lastTimestamp &&
+          item.timestamp.getTime() - lastTimestamp.getTime() > MAX_GAP_MS));
+
+    if (shouldBreak) {
+      flushGroup();
+    }
+
+    // Add to current group
+    currentGroup.push(item);
+    currentToolName = toolName;
+    lastTimestamp = item.timestamp;
+  }
+
+  // Flush any remaining group
+  flushGroup();
+
+  return result;
+}
+
+/**
+ * Type guard for grouped tool items
+ */
+function isToolGroup(
+  item: GroupedActivityItem
+): item is { type: "tool_group"; toolGroup: ToolGroup; id: string } {
+  return (item as { type: string }).type === "tool_group";
 }
 
 /**
@@ -569,6 +886,7 @@ export const AgentActivityTab = memo(function AgentActivityTab({
   isStreaming = false,
   className,
   planStatus,
+  isAwaitingApproval = false,
   onPlanApprove,
   onPlanReject,
 }: AgentActivityTabProps) {
@@ -595,6 +913,12 @@ export const AgentActivityTab = memo(function AgentActivityTab({
     return activityItems.filter(item => item.type !== "task_created");
   }, [activityItems, hasActivePlan]);
 
+  // Group consecutive tool calls of the same type
+  const groupedActivityItems = useMemo(
+    () => groupActivityItems(filteredActivityItems),
+    [filteredActivityItems]
+  );
+
   // Auto-scroll to bottom when new items arrive
   useEffect(() => {
     if (autoScroll && scrollRef.current) {
@@ -610,6 +934,11 @@ export const AgentActivityTab = memo(function AgentActivityTab({
     setAutoScroll(isAtBottom);
   };
 
+  // Render function for individual tool cards (passed to ToolGroupCard)
+  const renderToolCard = (item: ActivityItem, taskList: TaskData[]) => {
+    return <ActivityCard item={item} tasks={taskList} />;
+  };
+
   return (
     <div className={cn("flex flex-col h-full bg-background", className)}>
       <div
@@ -617,8 +946,8 @@ export const AgentActivityTab = memo(function AgentActivityTab({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 space-y-4"
       >
-        {filteredActivityItems.length === 0 && !accumulatedText && !hasActivePlan ? (
-          <EmptyState />
+        {groupedActivityItems.length === 0 && !accumulatedText && !hasActivePlan ? (
+          <EmptyState isAwaitingApproval={isAwaitingApproval || effectivePlanStatus === "awaiting_approval"} />
         ) : (
           <>
             {/* Aggregated Plan Card - shown at top when there are tasks */}
@@ -632,10 +961,20 @@ export const AgentActivityTab = memo(function AgentActivityTab({
               />
             )}
 
-            {/* Activity items (with task_created filtered out when plan is shown) */}
-            {filteredActivityItems.map((item) => (
-              <ActivityCard key={item.id} item={item} tasks={tasks} />
-            ))}
+            {/* Activity items (grouped and filtered) */}
+            {groupedActivityItems.map((item) => {
+              if (isToolGroup(item)) {
+                return (
+                  <ToolGroupCard
+                    key={item.id}
+                    group={item.toolGroup}
+                    tasks={tasks}
+                    renderToolCard={renderToolCard}
+                  />
+                );
+              }
+              return <ActivityCard key={item.id} item={item} tasks={tasks} />;
+            })}
 
             {/* Live streaming reasoning */}
             {isStreaming && accumulatedText && (
@@ -668,7 +1007,17 @@ export const AgentActivityTab = memo(function AgentActivityTab({
   );
 });
 
-const EmptyState = memo(function EmptyState() {
+const EmptyState = memo(function EmptyState({ isAwaitingApproval = false }: { isAwaitingApproval?: boolean }) {
+  if (isAwaitingApproval) {
+    // Don't show spinner when awaiting approval - workflow is paused
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+        <PauseCircleIcon className="size-8 mb-3 text-amber-500" />
+        <p className="text-sm">Awaiting plan approval</p>
+        <p className="text-xs mt-1">Use the buttons above to approve or reject the plan</p>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
       <Loader className="mb-3" />
@@ -738,11 +1087,19 @@ const ActivityCard = memo(function ActivityCard({ item, tasks = [] }: ActivityCa
     case "file_changed":
       return <ToolCard item={item} />;
     case "progress":
-      return <ProgressCard content={item.content || ""} />;
+      return <ProgressCard content={item.content || ""} status={item.status} />;
     case "completed":
       return <CompletedCard content={item.content || ""} />;
     case "error":
       return <ErrorCard content={item.content || ""} />;
+    case "phase_started":
+      return <PhaseStartedCard item={item} />;
+    case "phase_completed":
+      return <PhaseCompletedCard item={item} />;
+    case "phase_failed":
+      return <PhaseFailedCard item={item} />;
+    case "test_retry":
+      return <TestRetryCard item={item} />;
     default:
       return null;
   }
@@ -1056,10 +1413,155 @@ const ThinkingCard = memo(function ThinkingCard({ content }: { content: string }
 });
 
 /**
+ * ExecutionResult card - renders execution/test results in a formatted way
+ * Handles JSON with success, completed_tasks, output, errors fields
+ */
+interface ExecutionResultData {
+  success: boolean;
+  completed_tasks?: string[];
+  output?: string;
+  errors?: string[];
+  passed?: number;
+  failed?: number;
+  summary?: string;
+}
+
+function tryParseExecutionResult(content: string): ExecutionResultData | null {
+  // Quick check for JSON-like content with expected fields
+  if (!content.includes('"success"') || !content.includes('"output"')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    // Validate it has the expected structure
+    if (typeof parsed.success === "boolean" && ("output" in parsed || "summary" in parsed)) {
+      return parsed as ExecutionResultData;
+    }
+  } catch {
+    // Not valid JSON
+  }
+  return null;
+}
+
+const ExecutionResultCard = memo(function ExecutionResultCard({
+  result
+}: {
+  result: ExecutionResultData
+}) {
+  const isSuccess = result.success;
+  const hasErrors = result.errors && result.errors.length > 0;
+
+  return (
+    <div className="flex gap-3">
+      {/* Status Avatar */}
+      <div className="flex-shrink-0">
+        <div className={cn(
+          "size-8 rounded-full flex items-center justify-center",
+          isSuccess
+            ? "bg-gradient-to-br from-green-500 to-emerald-600"
+            : "bg-gradient-to-br from-red-500 to-rose-600"
+        )}>
+          {isSuccess ? (
+            <CheckCircle2Icon className="size-4 text-white" />
+          ) : (
+            <XCircleIcon className="size-4 text-white" />
+          )}
+        </div>
+      </div>
+
+      {/* Result content */}
+      <div className="flex-1 min-w-0 space-y-3">
+        {/* Header */}
+        <div className={cn(
+          "flex items-center gap-2 font-medium",
+          isSuccess ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"
+        )}>
+          {isSuccess ? "Execution Complete" : "Execution Failed"}
+        </div>
+
+        {/* Completed Tasks */}
+        {result.completed_tasks && result.completed_tasks.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              <ListChecksIcon className="size-3.5" />
+              Completed Tasks
+            </div>
+            <ul className="space-y-1 ml-1">
+              {result.completed_tasks.map((task, i) => (
+                <li key={i} className="flex items-center gap-2 text-sm text-foreground">
+                  <CheckCircle2Icon className="size-3.5 text-green-500 flex-shrink-0" />
+                  <span>{task}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Output/Summary */}
+        {(result.output || result.summary) && (
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Summary
+            </div>
+            <div className="text-sm text-foreground whitespace-pre-wrap bg-muted/30 rounded-md px-3 py-2 border border-border/50">
+              {result.output || result.summary}
+            </div>
+          </div>
+        )}
+
+        {/* Test Results (if present) */}
+        {(result.passed !== undefined || result.failed !== undefined) && (
+          <div className="flex items-center gap-4 text-sm">
+            {result.passed !== undefined && (
+              <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400">
+                <CheckCircle2Icon className="size-3.5" />
+                {result.passed} passed
+              </span>
+            )}
+            {result.failed !== undefined && result.failed > 0 && (
+              <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400">
+                <XCircleIcon className="size-3.5" />
+                {result.failed} failed
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Errors */}
+        {hasErrors && (
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-red-600 dark:text-red-400 uppercase tracking-wide">
+              <AlertCircleIcon className="size-3.5" />
+              Errors
+            </div>
+            <ul className="space-y-1 ml-1">
+              {result.errors!.map((error, i) => (
+                <li key={i} className="text-sm text-red-600 dark:text-red-400">
+                  {error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+/**
  * Text card - visible LLM output (not internal reasoning)
  * Displayed expanded by default
+ * Detects and formats ExecutionResult JSON automatically
  */
 const TextCard = memo(function TextCard({ content }: { content: string }) {
+  // Try to parse as ExecutionResult
+  const executionResult = useMemo(() => tryParseExecutionResult(content), [content]);
+
+  if (executionResult) {
+    return <ExecutionResultCard result={executionResult} />;
+  }
+
   return (
     <div className="flex gap-3">
       {/* Agent Avatar */}
@@ -1112,7 +1614,7 @@ const StreamingReasoning = memo(function StreamingReasoning({
  * Handles tool_call/tool_result events with toolName="think"
  */
 const LegacyThinkToolCard = memo(function LegacyThinkToolCard({ item }: { item: ActivityItem }) {
-  const isComplete = item.status === "completed" || item.status === "error";
+  const isComplete = item.status === "success" || item.status === "error";
 
   // Extract thinking content from toolInput (usually an array with first element being the thought)
   let thinkingContent: string;
@@ -1156,7 +1658,7 @@ const LegacyDraftPlanToolCard = memo(function LegacyDraftPlanToolCard({
   item: ActivityItem;
   tasks?: TaskData[];
 }) {
-  const isComplete = item.status === "completed";
+  const isComplete = item.status === "success";
   const isStreaming = item.status === "running";
 
   // Parse plan content from toolInput
@@ -1318,11 +1820,32 @@ const ToolCard = memo(function ToolCard({ item }: { item: ActivityItem }) {
 
 /**
  * Progress card
+ * Shows spinner for active processing, or waiting icon for approval/paused states
  */
-const ProgressCard = memo(function ProgressCard({ content }: { content: string }) {
+const ProgressCard = memo(function ProgressCard({
+  content,
+  status
+}: {
+  content: string;
+  status?: "running" | "success" | "error";
+}) {
+  // Check if this is an approval-waiting state (shouldn't have active spinner)
+  const isWaitingForApproval = content.toLowerCase().includes("approval") ||
+    content.toLowerCase().includes("awaiting") ||
+    content.toLowerCase().includes("waiting for");
+
+  // Show spinner only when actively processing (status is running and not waiting for approval)
+  const showSpinner = status === "running" && !isWaitingForApproval;
+
   return (
     <div className="ml-11 flex items-center gap-2 py-2">
-      <Loader />
+      {showSpinner ? (
+        <Loader />
+      ) : isWaitingForApproval ? (
+        <PauseCircleIcon className="size-4 text-amber-500" />
+      ) : (
+        <CircleIcon className="size-4 text-muted-foreground" />
+      )}
       <span className="text-sm text-muted-foreground">{content}</span>
     </div>
   );
@@ -1490,6 +2013,218 @@ const ErrorCard = memo(function ErrorCard({ content }: { content: string }) {
       <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/30 rounded-lg">
         <AlertCircleIcon className="size-4 text-destructive flex-shrink-0 mt-0.5" />
         <p className="text-sm text-destructive">{content}</p>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Get icon and color for a phase
+ */
+function getPhaseStyle(phase: string): { icon: React.ReactNode; bgColor: string; textColor: string; borderColor: string } {
+  switch (phase?.toLowerCase()) {
+    case "cloning":
+    case "clone":
+      return {
+        icon: <GitBranchIcon className="size-4" />,
+        bgColor: "bg-sky-500/10",
+        textColor: "text-sky-600 dark:text-sky-400",
+        borderColor: "border-sky-500/30",
+      };
+    case "planning":
+    case "plan":
+      return {
+        icon: <ClipboardListIcon className="size-4" />,
+        bgColor: "bg-violet-500/10",
+        textColor: "text-violet-600 dark:text-violet-400",
+        borderColor: "border-violet-500/30",
+      };
+    case "execution":
+    case "executing":
+      return {
+        icon: <CodeIcon className="size-4" />,
+        bgColor: "bg-blue-500/10",
+        textColor: "text-blue-600 dark:text-blue-400",
+        borderColor: "border-blue-500/30",
+      };
+    case "testing":
+    case "test":
+      return {
+        icon: <FlaskConicalIcon className="size-4" />,
+        bgColor: "bg-amber-500/10",
+        textColor: "text-amber-600 dark:text-amber-400",
+        borderColor: "border-amber-500/30",
+      };
+    default:
+      return {
+        icon: <PlayIcon className="size-4" />,
+        bgColor: "bg-gray-500/10",
+        textColor: "text-gray-600 dark:text-gray-400",
+        borderColor: "border-gray-500/30",
+      };
+  }
+}
+
+/**
+ * Phase started card - shows when a workflow phase begins
+ */
+const PhaseStartedCard = memo(function PhaseStartedCard({
+  item,
+}: {
+  item: ActivityItem;
+}) {
+  const { icon, bgColor, textColor, borderColor } = getPhaseStyle(item.phase || "");
+  const phaseName = item.phase ? item.phase.charAt(0).toUpperCase() + item.phase.slice(1) : "Phase";
+
+  return (
+    <div className="ml-11">
+      <div className={cn("flex items-center gap-2 py-2 px-3 rounded-md border", bgColor, borderColor)}>
+        <div className={textColor}>{icon}</div>
+        <div className="flex-1 min-w-0">
+          <span className={cn("text-sm font-medium", textColor)}>
+            {phaseName} started
+          </span>
+          {item.content && item.content !== `${phaseName} started` && (
+            <span className="text-sm text-muted-foreground ml-2">
+              — {item.content}
+            </span>
+          )}
+        </div>
+        {item.progress !== undefined && (
+          <span className="text-xs text-muted-foreground font-mono">
+            {item.progress}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Phase completed card - shows when a workflow phase completes with stats
+ */
+const PhaseCompletedCard = memo(function PhaseCompletedCard({
+  item,
+}: {
+  item: ActivityItem;
+}) {
+  const phase = item.phase?.toLowerCase();
+  const phaseName = item.phase ? item.phase.charAt(0).toUpperCase() + item.phase.slice(1) : "Phase";
+
+  // Determine success/failure state
+  const isSuccess = item.passed !== false && item.status !== "error";
+  const bgColor = isSuccess ? "bg-green-500/10" : "bg-red-500/10";
+  const textColor = isSuccess ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400";
+  const borderColor = isSuccess ? "border-green-500/30" : "border-red-500/30";
+
+  return (
+    <div className="ml-11">
+      <div className={cn("py-2 px-3 rounded-md border", bgColor, borderColor)}>
+        <div className="flex items-center gap-2">
+          {isSuccess ? (
+            <CheckCircle2Icon className={cn("size-4", textColor)} />
+          ) : (
+            <XCircleIcon className={cn("size-4", textColor)} />
+          )}
+          <span className={cn("text-sm font-medium", textColor)}>
+            {phaseName} {isSuccess ? "completed" : "failed"}
+          </span>
+          {item.progress !== undefined && (
+            <span className="text-xs text-muted-foreground font-mono ml-auto">
+              {item.progress}%
+            </span>
+          )}
+        </div>
+
+        {/* Stats based on phase type */}
+        <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-muted-foreground">
+          {/* Planning stats */}
+          {phase === "planning" && item.tasksCount !== undefined && (
+            <span>{item.tasksCount} task{item.tasksCount !== 1 ? "s" : ""} created</span>
+          )}
+          {phase === "planning" && item.testsCount !== undefined && (
+            <span>{item.testsCount} test{item.testsCount !== 1 ? "s" : ""} defined</span>
+          )}
+
+          {/* Execution stats */}
+          {phase === "execution" && item.completedTasks && item.completedTasks.length > 0 && (
+            <span>{item.completedTasks.length} task{item.completedTasks.length !== 1 ? "s" : ""} completed</span>
+          )}
+
+          {/* Testing stats */}
+          {phase === "testing" && item.testsRun !== undefined && (
+            <>
+              <span>{item.testsRun} test{item.testsRun !== 1 ? "s" : ""} run</span>
+              {item.testsPassed !== undefined && (
+                <span className="text-green-600 dark:text-green-400">
+                  {item.testsPassed} passed
+                </span>
+              )}
+              {item.testsFailed !== undefined && item.testsFailed > 0 && (
+                <span className="text-red-600 dark:text-red-400">
+                  {item.testsFailed} failed
+                </span>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Status message if different from default */}
+        {item.content && !item.content.toLowerCase().includes("completed") && (
+          <p className="mt-1 text-xs text-muted-foreground">{item.content}</p>
+        )}
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Phase failed card - shows when a workflow phase fails
+ */
+const PhaseFailedCard = memo(function PhaseFailedCard({
+  item,
+}: {
+  item: ActivityItem;
+}) {
+  const phaseName = item.phase ? item.phase.charAt(0).toUpperCase() + item.phase.slice(1) : "Phase";
+
+  return (
+    <div className="ml-11">
+      <div className="flex items-start gap-2 p-3 bg-destructive/10 border border-destructive/30 rounded-lg">
+        <XCircleIcon className="size-4 text-destructive flex-shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-medium text-destructive">
+            {phaseName} failed
+          </p>
+          {item.content && (
+            <p className="text-sm text-destructive/80 mt-0.5">{item.content}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * Test retry card - shows when tests are being retried
+ */
+const TestRetryCard = memo(function TestRetryCard({
+  item,
+}: {
+  item: ActivityItem;
+}) {
+  return (
+    <div className="ml-11">
+      <div className="flex items-center gap-2 py-2 px-3 bg-amber-500/10 border border-amber-500/30 rounded-md">
+        <RefreshCwIcon className="size-4 text-amber-600 dark:text-amber-400" />
+        <span className="text-sm text-amber-600 dark:text-amber-400">
+          Test retry attempt {item.attempt} of {item.maxRetries}
+        </span>
+        {item.content && (
+          <span className="text-sm text-muted-foreground">
+            — {item.content}
+          </span>
+        )}
       </div>
     </div>
   );

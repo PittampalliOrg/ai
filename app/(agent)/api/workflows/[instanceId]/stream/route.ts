@@ -22,25 +22,25 @@ import {
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
 import { getWorkflowEvents } from "@/lib/workflow-event-store";
 import { getAgentSession } from "@/lib/db/agent-queries";
+import { getConfig, isFeatureEnabled } from "@/lib/dapr/config-provider";
 
-// Workflow orchestrator service configuration
-const WORKFLOW_SERVICE_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
+// Service URLs from Dapr Configuration (Azure App Config) with fallbacks
+const getWorkflowServiceUrl = () =>
+  getConfig("WORKFLOW_SERVICE_URL", "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80");
 
-// Planner dapr agent Dapr app ID (for wf- prefixed workflows)
-const PLANNER_DAPR_AGENT_APP_ID = process.env.PLANNER_DAPR_AGENT_APP_ID || "planner-dapr-agent.planner-agent";
+const getPlannerDaprAgentAppId = () =>
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent");
 
 // Direct Kubernetes service URL for SSE streaming (bypasses Dapr to avoid buffering)
-// Dapr buffers HTTP responses which breaks SSE streaming
-const PLANNER_DAPR_AGENT_SERVICE_URL = process.env.PLANNER_DAPR_AGENT_SERVICE_URL ||
-  "http://planner-dapr-agent.planner-agent.svc.cluster.local:8000";
+const getPlannerDaprAgentServiceUrl = () =>
+  getConfig("PLANNER_DAPR_AGENT_SERVICE_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
 
 // Dapr sidecar URL for service invocation (used for non-streaming requests)
 const DAPR_HTTP_PORT = process.env.DAPR_HTTP_PORT || "3500";
 const DAPR_SIDECAR_URL = `http://localhost:${DAPR_HTTP_PORT}`;
 
 // Enable workflow patterns
-const WORKFLOW_PATTERNS_ENABLED = process.env.WORKFLOW_PATTERNS_ENABLED === "true";
+const isWorkflowPatternsEnabled = () => isFeatureEnabled("WORKFLOW_PATTERNS_ENABLED");
 
 // Terminal states that end the stream
 const TERMINAL_STATES: WorkflowRuntimeStatus[] = [
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   // Try workflow-patterns first if enabled
-  if (WORKFLOW_PATTERNS_ENABLED) {
+  if (isWorkflowPatternsEnabled()) {
     try {
       // Check if this is a workflow-patterns workflow by Dapr workflow ID
       const indexEntry = await getWorkflowFromIndex(instanceId);
@@ -177,7 +177,7 @@ async function streamPlannerDaprAgent(instanceId: string): Promise<Response> {
 
   // Try direct Kubernetes service first (bypasses Dapr buffering for SSE)
   try {
-    const directStreamUrl = `${PLANNER_DAPR_AGENT_SERVICE_URL}/workflows/${instanceId}/stream`;
+    const directStreamUrl = `${getPlannerDaprAgentServiceUrl()}/workflows/${instanceId}/stream`;
     console.log(`[Stream] Trying direct connection: ${directStreamUrl}`);
 
     const response = await fetch(directStreamUrl, {
@@ -206,7 +206,7 @@ async function streamPlannerDaprAgent(instanceId: string): Promise<Response> {
 
   // Fallback to Dapr service invocation (may have buffering issues with SSE)
   try {
-    const streamUrl = `${DAPR_SIDECAR_URL}/v1.0/invoke/${PLANNER_DAPR_AGENT_APP_ID}/method/workflows/${instanceId}/stream`;
+    const streamUrl = `${DAPR_SIDECAR_URL}/v1.0/invoke/${getPlannerDaprAgentAppId()}/method/workflows/${instanceId}/stream`;
     console.log(`[Stream] Trying Dapr service invocation: ${streamUrl}`);
 
     const response = await fetch(streamUrl, {
@@ -317,7 +317,7 @@ async function streamPlannerDaprAgentPolling(instanceId: string): Promise<Respon
             // Poll workflow status from planner-dapr-agent
             // ============================================================
             const response = await fetch(
-              `${DAPR_SIDECAR_URL}/v1.0/invoke/${PLANNER_DAPR_AGENT_APP_ID}/method/workflows/${instanceId}`,
+              `${DAPR_SIDECAR_URL}/v1.0/invoke/${getPlannerDaprAgentAppId()}/method/workflows/${instanceId}`,
               {
                 headers: { "Content-Type": "application/json" },
               }
@@ -836,7 +836,7 @@ async function streamSessionEvents(sessionId: string, request: NextRequest): Pro
 async function streamWorkflowOrchestrator(instanceId: string): Promise<Response> {
   try {
     // Build the SSE URL for the workflow-orchestrator
-    const eventsUrl = `${WORKFLOW_SERVICE_URL}/api/workflows/${encodeURIComponent(instanceId)}/events`;
+    const eventsUrl = `${getWorkflowServiceUrl()}/api/workflows/${encodeURIComponent(instanceId)}/events`;
     console.log(`[Stream Proxy] Connecting to ${eventsUrl}`);
 
     // Fetch with SSE headers

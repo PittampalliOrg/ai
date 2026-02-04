@@ -51,15 +51,49 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   const { workflow } = useWorkflow(workflowId, 3000);
 
   // Fetch workflow status via REST polling (deterministic source of truth)
-  const { phase: statusPhase, progress, message: statusMessage } = useWorkflowStatus(workflowId, 2000);
+  const { phase: statusPhase, progress, message: statusMessage, runtimeStatus } = useWorkflowStatus(workflowId, 2000);
 
   // Derive agent-specific state
   // Use REST-polled status as primary source, fall back to SSE events
   const phase = useMemo(() => derivePhase(events), [events]);
   const normalizedStatusPhase = statusPhase?.toLowerCase() || "";
+  const normalizedRuntimeStatus = runtimeStatus?.toUpperCase() || "";
   const isAwaitingApproval = normalizedStatusPhase === "awaiting_approval" || phase === "approve";
-  const isWorkflowActive = !!statusPhase && normalizedStatusPhase !== "completed" && normalizedStatusPhase !== "failed";
+
+  // Workflow is complete when runtimeStatus is COMPLETED/FAILED/REJECTED, or phase indicates completion
+  const isWorkflowComplete =
+    normalizedRuntimeStatus === "COMPLETED" ||
+    normalizedRuntimeStatus === "FAILED" ||
+    normalizedRuntimeStatus === "REJECTED" ||
+    normalizedStatusPhase === "completed" ||
+    normalizedStatusPhase === "failed" ||
+    normalizedStatusPhase === "tests_failed" ||
+    normalizedStatusPhase === "rejected";
+
+  const isWorkflowActive = !!statusPhase && !isWorkflowComplete;
   const isStreaming = executionStatus === "running" && accumulatedText.length > 0;
+
+  // Override executionStatus based on backend status (more reliable)
+  const derivedExecutionStatus = useMemo(() => {
+    if (isWorkflowComplete) {
+      // Check if it's an error state
+      if (normalizedRuntimeStatus === "FAILED" ||
+          normalizedStatusPhase === "failed" ||
+          normalizedStatusPhase === "tests_failed") {
+        return "error" as const;
+      }
+      if (normalizedRuntimeStatus === "REJECTED" || normalizedStatusPhase === "rejected") {
+        return "error" as const;
+      }
+      return "completed" as const;
+    }
+    // Check if awaiting approval - show "idle" instead of "running" since nothing is actively processing
+    if (isAwaitingApproval) {
+      return "idle" as const;
+    }
+    // Fall back to stream-derived status
+    return executionStatus;
+  }, [isWorkflowComplete, normalizedRuntimeStatus, normalizedStatusPhase, executionStatus, isAwaitingApproval]);
 
   const taskPrompt = externalTaskPrompt ?? contextTaskPrompt;
 
@@ -141,7 +175,7 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
           workflowId={workflowId}
           isAwaitingApproval={isAwaitingApproval}
           isConnected={isConnected}
-          executionStatus={executionStatus}
+          executionStatus={derivedExecutionStatus}
           inputValue={inputValue}
           onInputChange={setInputValue}
           onSubmit={handleSubmit}

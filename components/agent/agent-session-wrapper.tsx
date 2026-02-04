@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AgentSessionHeader } from "./agent-session-header";
 import { CreatePRDialog } from "./create-pr-dialog";
 import { toast } from "sonner";
 import { useAgentExecutionContextOptional } from "@/contexts/agent-execution-context";
 import { useWorkflowExecutionOptional } from "@/contexts/workflow-execution-context";
+import { useWorkflowStatus } from "@/hooks/use-workflows";
 
 interface AgentSessionWrapperProps {
   sessionId: string;
@@ -40,13 +41,59 @@ export function AgentSessionWrapper({
   const agentContext = useAgentExecutionContextOptional();
   const workflowContext = useWorkflowExecutionOptional();
 
+  // Fetch workflow status from backend (deterministic source of truth)
+  const { phase: statusPhase, runtimeStatus } = useWorkflowStatus(
+    workflowContext?.workflowId,
+    2000
+  );
+
+  // Derive execution status from backend status (more reliable than SSE-only)
+  const derivedStatus = useMemo(() => {
+    const normalizedStatusPhase = statusPhase?.toLowerCase() || "";
+    const normalizedRuntimeStatus = runtimeStatus?.toUpperCase() || "";
+
+    // Check if workflow is complete based on backend status
+    const isWorkflowComplete =
+      normalizedRuntimeStatus === "COMPLETED" ||
+      normalizedRuntimeStatus === "FAILED" ||
+      normalizedRuntimeStatus === "REJECTED" ||
+      normalizedStatusPhase === "completed" ||
+      normalizedStatusPhase === "failed" ||
+      normalizedStatusPhase === "tests_failed" ||
+      normalizedStatusPhase === "rejected";
+
+    if (isWorkflowComplete) {
+      // Map to error status for failed/rejected states
+      if (
+        normalizedRuntimeStatus === "FAILED" ||
+        normalizedRuntimeStatus === "REJECTED" ||
+        normalizedStatusPhase === "failed" ||
+        normalizedStatusPhase === "tests_failed" ||
+        normalizedStatusPhase === "rejected"
+      ) {
+        return "error" as const;
+      }
+      return "completed" as const;
+    }
+
+    // Check if awaiting approval - show "idle" instead of "running" since nothing is actively processing
+    const isAwaitingApproval = normalizedStatusPhase === "awaiting_approval" ||
+      normalizedRuntimeStatus === "AWAITING_APPROVAL";
+    if (isAwaitingApproval) {
+      return "idle" as const;
+    }
+
+    // Fall back to context execution status
+    return workflowContext?.executionStatus ?? ("idle" as const);
+  }, [statusPhase, runtimeStatus, workflowContext?.executionStatus]);
+
   // Get stats from whichever context is available
   const agentStats = agentContext?.stats;
   const workflowStats = workflowContext
     ? {
         additions: workflowContext.fileChangeStats.additions,
         deletions: workflowContext.fileChangeStats.deletions,
-        status: workflowContext.executionStatus,
+        status: derivedStatus,
       }
     : null;
 

@@ -18,18 +18,17 @@ import type { WorkflowStatus } from "@/lib/types/workflow";
 import type { WorkflowListItem as UIWorkflowListItem } from "@/lib/types/workflow-ui";
 import { mapWorkflowStatus } from "@/lib/transforms/workflow-ui";
 import { listWorkflows as listPatternWorkflows } from "@/lib/workflow-patterns/workflow-index";
+import { getConfig } from "@/lib/dapr/config-provider";
 
-// Workflow orchestrator service configuration
-const WORKFLOW_SERVICE_URL =
-  process.env.WORKFLOW_SERVICE_URL || "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80";
+// Service URLs from Dapr Configuration (Azure App Config) with fallbacks
+const getWorkflowServiceUrl = () =>
+  getConfig("WORKFLOW_SERVICE_URL", "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80");
 
-// Planner orchestrator service configuration
-const PLANNER_SERVICE_URL =
-  process.env.PLANNER_SERVICE_URL || "http://planner-agent.planner-agent.svc.cluster.local:8080";
+const getPlannerServiceUrl = () =>
+  getConfig("PLANNER_SERVICE_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
 
-// Planner Dapr Agent service configuration
-const PLANNER_DAPR_AGENT_URL =
-  process.env.PLANNER_DAPR_AGENT_URL || "http://planner-dapr-agent.planner-agent.svc.cluster.local:8000";
+const getPlannerDaprAgentUrl = () =>
+  getConfig("PLANNER_DAPR_AGENT_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
 
 /**
  * GET /api/workflows
@@ -60,7 +59,7 @@ export async function GET(request: NextRequest) {
       }
 
       const response = await fetch(
-        `${WORKFLOW_SERVICE_URL}/api/workflows?${queryParams.toString()}`,
+        `${getWorkflowServiceUrl()}/api/workflows?${queryParams.toString()}`,
         {
           method: "GET",
           headers: { "Content-Type": "application/json" },
@@ -121,7 +120,7 @@ export async function GET(request: NextRequest) {
   if (source === "all" || source === "planner") {
     try {
       const response = await fetch(
-        `${PLANNER_SERVICE_URL}/api/workflows`,
+        `${getPlannerServiceUrl()}/api/workflows`,
         {
           method: "GET",
           headers: { "Content-Type": "application/json" },
@@ -193,7 +192,7 @@ export async function GET(request: NextRequest) {
   if (source === "all" || source === "dapr-agent") {
     try {
       const response = await fetch(
-        `${PLANNER_DAPR_AGENT_URL}/workflows`,
+        `${getPlannerDaprAgentUrl()}/workflows`,
         {
           method: "GET",
           headers: { "Content-Type": "application/json" },
@@ -208,6 +207,9 @@ export async function GET(request: NextRequest) {
           instanceId: string;
           workflowName?: string;
           status: string;
+          phase?: string;
+          progress?: number;
+          message?: string;
           createdAt?: string;
           updatedAt?: string;
           completedAt?: string;
@@ -225,6 +227,12 @@ export async function GET(request: NextRequest) {
             endTime: (uiStatus === "COMPLETED" || uiStatus === "FAILED")
               ? (w.completedAt || w.updatedAt || null)
               : null,
+            // Add customStatus with phase for table display
+            customStatus: w.phase ? {
+              phase: w.phase as "clone" | "exploration" | "planning" | "awaiting_approval" | "executing" | "completed" | "failed",
+              progress: w.progress ?? 0,
+              message: w.message || "",
+            } : undefined,
           };
         });
 

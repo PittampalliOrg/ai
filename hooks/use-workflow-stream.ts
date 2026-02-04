@@ -304,6 +304,8 @@ export function useWorkflowStream(
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isManualDisconnectRef = useRef(false);
+  const seenEventIdsRef = useRef<Set<string>>(new Set());
+  const workflowCompleteRef = useRef(false);
 
   // Update status and call callback
   const updateStatus = useCallback(
@@ -314,9 +316,24 @@ export function useWorkflowStream(
     [onStatusChange]
   );
 
-  // Add event to state
+  // Add event to state (with deduplication by ID)
   const addEvent = useCallback(
     (event: WorkflowStreamEvent) => {
+      // Early deduplication: skip entirely if we've seen this event ID
+      if (event.id && seenEventIdsRef.current.has(event.id)) {
+        return;
+      }
+
+      // Mark this event ID as seen
+      if (event.id) {
+        seenEventIdsRef.current.add(event.id);
+        // Prevent memory leak: limit seen IDs set size
+        if (seenEventIdsRef.current.size > maxEvents * 2) {
+          const idsArray = Array.from(seenEventIdsRef.current);
+          seenEventIdsRef.current = new Set(idsArray.slice(-maxEvents));
+        }
+      }
+
       const eventWithReceiveTime: WorkflowStreamEvent = {
         ...event,
         receivedAt: new Date().toISOString(),
@@ -347,6 +364,22 @@ export function useWorkflowStream(
         setLatestToolCall(null);
       }
 
+      // Track workflow completion to prevent unnecessary reconnects
+      const isCompletionEvent =
+        event.type === "stream_done" ||
+        event.type === "execution_completed" ||
+        event.type === "execution_failed" ||
+        (event.type === "phase_completed" && event.data?.phase === "testing") ||
+        (event.type === "status" && (
+          event.data?.runtimeStatus === "COMPLETED" ||
+          event.data?.runtimeStatus === "FAILED" ||
+          event.data?.runtimeStatus === "REJECTED"
+        ));
+
+      if (isCompletionEvent) {
+        workflowCompleteRef.current = true;
+      }
+
       // Call event callback
       onEvent?.(eventWithReceiveTime);
     },
@@ -363,6 +396,10 @@ export function useWorkflowStream(
     }
 
     isManualDisconnectRef.current = false;
+    // Only reset completion flag if this is a fresh connection (not a reconnect)
+    if (reconnectAttempts === 0) {
+      workflowCompleteRef.current = false;
+    }
     updateStatus("connecting");
     setError(null);
 
@@ -396,6 +433,15 @@ export function useWorkflowStream(
         // Only log as error if not a normal close (e.g., workflow completed)
         if (state !== EventSource.CLOSED) {
           console.warn(`[Stream] Connection issue (state: ${stateLabel})`);
+        }
+
+        // Check if workflow appears to be complete based on events we've received
+        // If so, treat the close as intentional and don't reconnect
+        if (workflowCompleteRef.current) {
+          console.log(`[Stream] Workflow appears complete, not reconnecting`);
+          updateStatus("disconnected");
+          eventSource.close();
+          return;
         }
 
         const connectionError = new Error(`Stream connection ${stateLabel}`);
@@ -461,6 +507,8 @@ export function useWorkflowStream(
     setAccumulatedText("");
     setLatestChunk(null);
     setLatestToolCall(null);
+    seenEventIdsRef.current.clear();
+    workflowCompleteRef.current = false;
   }, []);
 
   // Get events by type

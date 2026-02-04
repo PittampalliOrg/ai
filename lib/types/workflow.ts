@@ -31,7 +31,9 @@ export type PlanTaskStatus =
   | "in_progress"
   | "completed"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "not_started"
+  | "planned";
 
 /**
  * A task in the workflow plan (new orchestrator format)
@@ -328,6 +330,10 @@ export function getPlanTaskStatusLabel(status: PlanTaskStatus): string {
       return "Failed";
     case "skipped":
       return "Skipped";
+    case "not_started":
+      return "Not Started";
+    case "planned":
+      return "Planned";
     default:
       return "Unknown";
   }

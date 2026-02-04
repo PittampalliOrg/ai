@@ -16,10 +16,11 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { invokeService } from "@/lib/dapr/client";
+import { getConfig } from "@/lib/dapr/config-provider";
 
-// Planner dapr agent Dapr app ID
-// Use namespace-qualified app ID for cross-namespace Dapr invocation
-const PLANNER_DAPR_AGENT_APP_ID = process.env.PLANNER_DAPR_AGENT_APP_ID || "planner-dapr-agent.planner-agent";
+// Planner dapr agent Dapr app ID from Dapr Configuration (Azure App Config)
+const getPlannerDaprAgentAppId = () =>
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent");
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
@@ -87,11 +88,11 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
   try {
     // Call planner-dapr-agent's workflow approval endpoint via Dapr service invocation
-    console.log(`[Workflow Approve] Invoking ${PLANNER_DAPR_AGENT_APP_ID} via Dapr service invocation`);
+    console.log(`[Workflow Approve] Invoking ${getPlannerDaprAgentAppId()} via Dapr service invocation`);
     console.log(`[Workflow Approve] ${isApproval ? "Approving" : "Rejecting"} workflow ${instanceId}`);
 
     const response = await invokeService<{ success: boolean; error?: string }>({
-      appId: PLANNER_DAPR_AGENT_APP_ID,
+      appId: getPlannerDaprAgentAppId(),
       method: "POST",
       path: `/workflow/${instanceId}/approve`,
       body: {

@@ -385,16 +385,25 @@ function eventsToLogs(events: WorkflowStreamEvent[]): WorkflowLogEntry[] {
 
       case "initial":
       case "status":
-      case "execution_started":
+      case "execution_started": {
         // Handle initial/status workflow state events
+        // Detect approval-waiting states - these should not show as "running"
+        const content = data.content || data.message || data.status || "Workflow started";
+        const phase = data.phase?.toLowerCase() || "";
+        const isAwaitingApproval = phase === "awaiting_approval" ||
+          content.toLowerCase().includes("approval") ||
+          content.toLowerCase().includes("awaiting");
         logs.push({
           id: event.id,
           type: "progress",
-          content: data.content || data.message || data.status || "Workflow started",
+          content,
           timestamp: new Date(event.timestamp),
           progress: data.progress,
+          // Don't mark approval-waiting as "running" to avoid showing spinner
+          status: isAwaitingApproval ? undefined : (eventType === "execution_started" ? "running" : undefined),
         });
         break;
+      }
 
       case "phase_started":
         // Handle phase start events (cloning, planning, execution, testing)

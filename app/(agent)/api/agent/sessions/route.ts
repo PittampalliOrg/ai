@@ -10,14 +10,15 @@ import {
 import { verifyUserExists } from "@/lib/db/queries";
 import { invokeService } from "@/lib/dapr/client";
 import { getRepoAccessToken } from "@/lib/github/app-auth";
+import { getConfig } from "@/lib/dapr/config-provider";
 
 // Planner orchestrator Dapr app ID (cross-namespace Dapr invocation)
-const PLANNER_ORCHESTRATOR_APP_ID =
-  process.env.PLANNER_AGENT_APP_ID || "planner-orchestrator.planner-agent";
+const getPlannerOrchestratorAppId = () =>
+  getConfig("PLANNER_AGENT_APP_ID", "planner-orchestrator.planner-agent");
 
 // Planner dapr agent app ID (direct agent invocation for new workflow)
-const PLANNER_DAPR_AGENT_APP_ID =
-  process.env.PLANNER_DAPR_AGENT_APP_ID || "planner-dapr-agent.planner-agent";
+const getPlannerDaprAgentAppId = () =>
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent");
 
 /**
  * GET /api/agent/sessions
@@ -127,7 +128,7 @@ export async function POST(request: NextRequest) {
           approval_endpoint?: string;
           error?: string;
         }>({
-          appId: PLANNER_DAPR_AGENT_APP_ID,
+          appId: getPlannerDaprAgentAppId(),
           method: "POST",
           path: "/workflow/dapr",
           body: {
