@@ -43,6 +43,16 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Allow Dapr webhooks through (service-to-service, no user auth)
+  if (pathname.startsWith("/api/webhooks/dapr")) {
+    return NextResponse.next();
+  }
+
+  // Allow Dapr subscribe endpoint through (sidecar discovery)
+  if (pathname.startsWith("/api/dapr")) {
+    return NextResponse.next();
+  }
+
   // Allow login page without authentication
   if (pathname === "/login") {
     return NextResponse.next();

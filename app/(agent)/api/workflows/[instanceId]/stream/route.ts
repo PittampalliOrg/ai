@@ -22,18 +22,19 @@ import {
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
 import { getWorkflowEvents } from "@/lib/workflow-event-store";
 import { getAgentSession } from "@/lib/db/agent-queries";
+import { invokeService } from "@/lib/dapr/client";
 import { getConfig, isFeatureEnabled } from "@/lib/dapr/config-provider";
 
-// Service URLs from Dapr Configuration (Azure App Config) with fallbacks
-const getWorkflowServiceUrl = () =>
-  getConfig("WORKFLOW_SERVICE_URL", "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80");
+// Workflow orchestrator Dapr app ID (cross-namespace invocation to workflow-builder)
+const getWorkflowOrchestratorAppId = () =>
+  getConfig("WORKFLOW_ORCHESTRATOR_APP_ID", "workflow-orchestrator.workflow-builder");
 
 const getPlannerDaprAgentAppId = () =>
-  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent");
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent.workflow-builder");
 
 // Direct Kubernetes service URL for SSE streaming (bypasses Dapr to avoid buffering)
 const getPlannerDaprAgentServiceUrl = () =>
-  getConfig("PLANNER_DAPR_AGENT_SERVICE_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
+  getConfig("PLANNER_DAPR_AGENT_SERVICE_URL", "http://planner-dapr-agent.workflow-builder.svc.cluster.local:8000");
 
 // Dapr sidecar URL for service invocation (used for non-streaming requests)
 const DAPR_HTTP_PORT = process.env.DAPR_HTTP_PORT || "3500";
@@ -831,84 +832,229 @@ async function streamSessionEvents(sessionId: string, request: NextRequest): Pro
 }
 
 /**
- * Stream from workflow-orchestrator service
+ * Stream from workflow-orchestrator service (polling-based SSE)
+ *
+ * Polls the workflow-orchestrator's GET /api/v2/workflows/{id}/status endpoint
+ * and emits SSE events when status/phase changes. The orchestrator does not
+ * expose an SSE endpoint, so we poll and convert to SSE.
  */
 async function streamWorkflowOrchestrator(instanceId: string): Promise<Response> {
-  try {
-    // Build the SSE URL for the workflow-orchestrator
-    const eventsUrl = `${getWorkflowServiceUrl()}/api/workflows/${encodeURIComponent(instanceId)}/events`;
-    console.log(`[Stream Proxy] Connecting to ${eventsUrl}`);
+  console.log(`[Stream] Starting polling-based SSE for workflow-orchestrator: ${instanceId}`);
 
-    // Fetch with SSE headers
-    const upstreamResponse = await fetch(eventsUrl, {
-      headers: {
-        Accept: "text/event-stream",
-        "Cache-Control": "no-cache",
-      },
-      // Important: don't cache SSE connections
-      cache: "no-store",
-    });
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
 
-    if (!upstreamResponse.ok) {
-      if (upstreamResponse.status === 404) {
-        return new Response(
-          JSON.stringify({ error: `Workflow with ID "${instanceId}" not found` }),
-          { status: 404, headers: { "Content-Type": "application/json" } }
-        );
+      const sendEvent = (data: unknown) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+
+      const sendError = (error: string) => {
+        sendEvent({
+          id: `error-${Date.now()}`,
+          type: "error",
+          workflowId: instanceId,
+          data: { error },
+          timestamp: new Date().toISOString(),
+        });
+      };
+
+      try {
+        // Send initial event
+        sendEvent({
+          id: `init-${Date.now()}`,
+          type: "initial",
+          workflowId: instanceId,
+          data: {
+            status: "RUNNING",
+            content: "Workflow started",
+          },
+          timestamp: new Date().toISOString(),
+        });
+
+        // Poll orchestrator status via Dapr service invocation
+        const pollInterval = 1000;
+        const maxPollTime = 30 * 60 * 1000; // 30 minutes
+        const startTime = Date.now();
+        let lastPhase = "";
+        let lastStatus = "";
+        let lastNodeName = "";
+        let lastEventIndex = 0; // Track activity events from event store
+
+        while (Date.now() - startTime < maxPollTime) {
+          try {
+            // ============================================================
+            // Check for new activity events from pub/sub webhook (event store)
+            // Same pattern as streamPlannerDaprAgentPolling()
+            // ============================================================
+            const activityEvents = await getWorkflowEvents(instanceId);
+            if (activityEvents.length > lastEventIndex) {
+              const newEvents = activityEvents.slice(lastEventIndex);
+              for (const activityEvent of newEvents) {
+                const mappedType = mapEventType(activityEvent.type);
+
+                if (activityEvent.type === "tool_call" || activityEvent.type === "tool_result") {
+                  console.log(
+                    `[Stream] Forwarding ${activityEvent.type}: toolName=${activityEvent.data?.toolName || "unknown"} callId=${activityEvent.data?.callId || "NONE"}`
+                  );
+                }
+
+                sendEvent({
+                  id: activityEvent.id || `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  type: mappedType,
+                  workflowId: instanceId,
+                  taskId: activityEvent.taskId,
+                  data: activityEvent.data,
+                  timestamp: activityEvent.timestamp,
+                });
+              }
+              lastEventIndex = activityEvents.length;
+            }
+
+            // ============================================================
+            // Poll workflow status from workflow-orchestrator
+            // ============================================================
+            const response = await invokeService<{
+              instanceId: string;
+              runtimeStatus: string;
+              phase?: string | null;
+              progress?: number;
+              message?: string | null;
+              currentNodeId?: string | null;
+              currentNodeName?: string | null;
+              outputs?: unknown;
+              error?: string | null;
+            }>({
+              appId: getWorkflowOrchestratorAppId(),
+              method: "GET",
+              path: `/api/v2/workflows/${instanceId}/status`,
+              timeout: 15000,
+            });
+
+            if (!response.ok) {
+              if (response.status === 404) {
+                sendError(`Workflow ${instanceId} not found`);
+                controller.close();
+                return;
+              }
+              // Transient error, continue polling
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
+              continue;
+            }
+
+            const data = response.data;
+            if (!data) {
+              await new Promise(resolve => setTimeout(resolve, pollInterval));
+              continue;
+            }
+
+            const currentPhase = data.phase || "";
+            const currentStatus = data.runtimeStatus || "";
+            const currentNodeName = data.currentNodeName || "";
+
+            // Send update if status, phase, or current node changed
+            if (currentStatus !== lastStatus || currentPhase !== lastPhase || currentNodeName !== lastNodeName) {
+              const phaseChanged = currentPhase !== lastPhase;
+              const nodeChanged = currentNodeName !== lastNodeName;
+              lastStatus = currentStatus;
+              lastPhase = currentPhase;
+              lastNodeName = currentNodeName;
+
+              // Map to AWAITING_APPROVAL if at approval gate
+              // Check phase first, then fall back to detecting approval node ID
+              const isAtApprovalGate = currentPhase === "awaiting_approval"
+                || (data.currentNodeId?.startsWith("approve") && currentStatus === "RUNNING");
+              const uiStatus = isAtApprovalGate ? "AWAITING_APPROVAL" : currentStatus;
+
+              sendEvent({
+                id: `status-${Date.now()}`,
+                type: "status",
+                workflowId: instanceId,
+                data: {
+                  status: uiStatus,
+                  phase: currentPhase,
+                  progress: data.progress || 0,
+                  message: data.message,
+                  currentNodeId: data.currentNodeId,
+                  currentNodeName: data.currentNodeName,
+                },
+                timestamp: new Date().toISOString(),
+              });
+
+              // Also emit task_progress for the UI's activity panel
+              // This prevents "Waiting for agent activity..." by giving the UI
+              // visible progress events when status/phase/node changes
+              if (phaseChanged || nodeChanged) {
+                // When at approval gate, emit "Plan ready for approval" text
+                // which the workflow-sidebar.tsx detects to show the approval button
+                const isApprovalPhase = isAtApprovalGate;
+                const progressContent = isApprovalPhase
+                  ? "Plan ready for approval"
+                  : currentNodeName
+                    ? `Executing: ${currentNodeName}`
+                    : data.message || `Phase: ${currentPhase}`;
+
+                sendEvent({
+                  id: `progress-${Date.now()}`,
+                  type: "task_progress",
+                  workflowId: instanceId,
+                  data: {
+                    status: progressContent,
+                    content: progressContent,
+                    phase: currentPhase,
+                    currentNodeName: data.currentNodeName,
+                  },
+                  timestamp: new Date().toISOString(),
+                });
+              }
+            }
+
+            // Check for terminal states
+            if (["COMPLETED", "FAILED", "TERMINATED"].includes(currentStatus)) {
+              console.log(`[Stream] Workflow ${instanceId} reached terminal state: ${currentStatus}`);
+
+              sendEvent({
+                id: `complete-${Date.now()}`,
+                type: "task_completed",
+                workflowId: instanceId,
+                data: {
+                  status: currentStatus,
+                  metadata: {
+                    workflowComplete: true,
+                    output: data.outputs,
+                  },
+                },
+                timestamp: new Date().toISOString(),
+              });
+
+              controller.close();
+              return;
+            }
+          } catch (pollError) {
+            console.error(`[Stream] Error polling workflow-orchestrator for ${instanceId}:`, pollError);
+            // Continue polling on transient errors
+          }
+
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        // Timeout
+        sendError("Stream timed out after 30 minutes");
+        controller.close();
+      } catch (error) {
+        console.error(`[Stream] Error in workflow-orchestrator stream for ${instanceId}:`, error);
+        sendError(error instanceof Error ? error.message : "Unknown error");
+        controller.close();
       }
+    },
+  });
 
-      const errorText = await upstreamResponse.text();
-      console.error(`[Stream Proxy] Upstream error ${upstreamResponse.status}: ${errorText}`);
-      return new Response(
-        JSON.stringify({ error: `Workflow service error: ${upstreamResponse.status}` }),
-        { status: upstreamResponse.status, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Check if we got an SSE response
-    const contentType = upstreamResponse.headers.get("Content-Type") ?? "";
-    if (!contentType.includes("text/event-stream")) {
-      console.warn(`[Stream Proxy] Unexpected content type: ${contentType}`);
-    }
-
-    // Stream the response body directly to the client
-    const body = upstreamResponse.body;
-
-    if (!body) {
-      return new Response(
-        JSON.stringify({ error: "No stream available from upstream" }),
-        { status: 502, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    // Return the proxied SSE stream with appropriate headers
-    return new Response(body, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no", // Disable nginx buffering
-      },
-    });
-  } catch (error) {
-    console.error(`[Stream Proxy] Error connecting to workflow ${instanceId}:`, error);
-
-    // Check if it's a connection error
-    if (error instanceof TypeError && error.message.includes("fetch")) {
-      return new Response(
-        JSON.stringify({
-          error: "Cannot connect to workflow service. Make sure workflow-orchestrator is running.",
-        }),
-        { status: 503, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : "Failed to connect to stream",
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

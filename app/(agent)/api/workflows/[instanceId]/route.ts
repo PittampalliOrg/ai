@@ -15,7 +15,7 @@ import {
   initializeWorkflowPatternsRuntime,
 } from "@/lib/workflow-patterns/runtime";
 import { getWorkflow as getWorkflowFromIndex, syncWorkflowFromDapr } from "@/lib/workflow-patterns/workflow-index";
-import { getState } from "@/lib/dapr/client";
+import { getState, invokeService } from "@/lib/dapr/client";
 import { getConfig } from "@/lib/dapr/config-provider";
 
 // Custom state store for activities (used by planner-dapr-agent)
@@ -129,15 +129,16 @@ function activitiesToExecutionLogs(activities: WorkflowActivity[]): ExecutionLog
   return logs;
 }
 
-// Service URLs from Dapr Configuration (Azure App Config) with fallbacks
-const getWorkflowServiceUrl = () =>
-  getConfig("WORKFLOW_SERVICE_URL", "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80");
+// Dapr app IDs for cross-namespace service invocation
+const getWorkflowOrchestratorAppId = () =>
+  getConfig("WORKFLOW_ORCHESTRATOR_APP_ID", "workflow-orchestrator.workflow-builder");
 
+const getPlannerDaprAgentAppId = () =>
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent.workflow-builder");
+
+// Legacy planner-orchestrator URL (for older planner-* workflows)
 const getPlannerServiceUrl = () =>
-  getConfig("PLANNER_SERVICE_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
-
-const getPlannerDaprAgentUrl = () =>
-  getConfig("PLANNER_DAPR_AGENT_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
+  getConfig("PLANNER_SERVICE_URL", "http://planner-dapr-agent.workflow-builder.svc.cluster.local:8000");
 
 // ============================================================================
 // Pattern Step Definitions
@@ -274,20 +275,19 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // First, try the workflow-orchestrator service
+  // First, try the workflow-orchestrator service via Dapr service invocation
   try {
-    const workflowUrl = `${getWorkflowServiceUrl()}/api/workflows/${instanceId}`;
-    console.log(`[Workflow Detail] Fetching workflow from ${workflowUrl}`);
+    console.log(`[Workflow Detail] Fetching workflow from ${getWorkflowOrchestratorAppId()} via Dapr`);
 
-    const response = await fetch(workflowUrl, {
+    const response = await invokeService<WorkflowEntry & { phase?: string }>({
+      appId: getWorkflowOrchestratorAppId(),
       method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      path: `/api/workflows/${instanceId}`,
+      timeout: 15000,
     });
 
     if (response.ok) {
-      const data = await response.json() as WorkflowEntry & { phase?: string };
+      const data = response.data as WorkflowEntry & { phase?: string };
 
       // Map phase to appropriate status for UI
       let displayStatus = data.status;
@@ -306,8 +306,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     // If not 404, it's a real error from orchestrator
     if (response.status !== 404) {
-      const errorText = await response.text();
-      console.error(`[Workflow Detail] Service returned ${response.status}: ${errorText}`);
+      console.error(`[Workflow Detail] Service returned ${response.status}: ${response.statusText}`);
       return NextResponse.json(
         { error: `Workflow service error: ${response.status}` },
         { status: response.status }
@@ -396,20 +395,40 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
   }
 
-  // Try planner-dapr-agent (for wf-* workflow IDs)
+  // Try planner-dapr-agent (for wf-* workflow IDs) via Dapr service invocation
   if (instanceId.startsWith("wf-")) {
     try {
-      // Use /workflows/{id} endpoint directly as it contains all the data
-      const daprAgentUrl = `${getPlannerDaprAgentUrl()}/workflows/${instanceId}`;
-      console.log(`[Workflow Detail] Fetching workflow from ${daprAgentUrl}`);
+      console.log(`[Workflow Detail] Fetching workflow from ${getPlannerDaprAgentAppId()} via Dapr`);
 
-      const response = await fetch(daprAgentUrl, {
+      const response = await invokeService<{
+        instanceId: string;
+        workflowName?: string;
+        status: string;
+        phase?: string;
+        progress?: number;
+        message?: string;
+        plan?: {
+          summary?: string;
+          tasks?: Array<{ id: string; subject: string; description: string; status: string; blockedBy?: string[]; blocks?: string[] }>;
+          tests?: Array<{ id: string; task_id: string; description: string; test_type: string; command?: string; expected?: string }>;
+          reasoning?: string;
+        };
+        activities?: WorkflowActivity[];
+        input?: { message?: string };
+        output?: Record<string, unknown>;
+        error?: string;
+        createdAt?: string;
+        updatedAt?: string;
+        completedAt?: string;
+      }>({
+        appId: getPlannerDaprAgentAppId(),
         method: "GET",
-        headers: { "Content-Type": "application/json" },
+        path: `/workflows/${instanceId}`,
+        timeout: 15000,
       });
 
       if (response.ok) {
-        const data = await response.json() as {
+        const data = response.data as {
           instanceId: string;
           workflowName?: string;
           status: string;
@@ -460,7 +479,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         }
 
         // Build plan from response - check both top-level and output.plan locations
-        const planData = data.plan || data.output?.plan;
+        type PlanData = typeof data.plan;
+        const planData = data.plan || (data.output?.plan as PlanData);
         const planTasks = planData?.tasks?.map(t => ({
           id: t.id,
           title: t.subject,
@@ -541,8 +561,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       }
 
       if (response.status !== 404) {
-        const errorText = await response.text();
-        console.error(`[Workflow Detail] Planner Dapr Agent returned ${response.status}: ${errorText}`);
+        console.error(`[Workflow Detail] Planner Dapr Agent returned ${response.status}: ${response.statusText}`);
       }
     } catch (error) {
       console.log(`[Workflow Detail] Planner Dapr Agent unavailable, trying workflow-patterns`);

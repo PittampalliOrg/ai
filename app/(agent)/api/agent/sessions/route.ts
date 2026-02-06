@@ -11,14 +11,11 @@ import { verifyUserExists } from "@/lib/db/queries";
 import { invokeService } from "@/lib/dapr/client";
 import { getRepoAccessToken } from "@/lib/github/app-auth";
 import { getConfig } from "@/lib/dapr/config-provider";
+import { AGENT_WORKFLOW_DEFINITION } from "@/lib/workflows/agent-workflow-definition";
 
-// Planner orchestrator Dapr app ID (cross-namespace Dapr invocation)
-const getPlannerOrchestratorAppId = () =>
-  getConfig("PLANNER_AGENT_APP_ID", "planner-orchestrator.planner-agent");
-
-// Planner dapr agent app ID (direct agent invocation for new workflow)
-const getPlannerDaprAgentAppId = () =>
-  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent");
+// Workflow orchestrator Dapr app ID (cross-namespace invocation to workflow-builder)
+const getWorkflowOrchestratorAppId = () =>
+  getConfig("WORKFLOW_ORCHESTRATOR_APP_ID", "workflow-orchestrator.workflow-builder");
 
 /**
  * GET /api/agent/sessions
@@ -94,7 +91,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Start workflow if requested (atomic session + workflow creation)
-    // Uses planner-dapr-agent for enhanced workflow with clone → planning → approval → execution → testing
+    // Uses workflow-orchestrator for 5-node workflow: Clone → Plan → Approve → Execute
     if (task && startWorkflow && targetRepository) {
       try {
         console.log(
@@ -119,35 +116,34 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Call planner-dapr-agent's workflow API via Dapr service invocation
-        // This uses the enhanced workflow with clone → planning → approval → execution → testing
+        // Call workflow-orchestrator's workflow API via Dapr service invocation
+        // This uses the 5-node workflow: Clone → Plan → Approve → Execute
         const workflowResponse = await invokeService<{
-          workflow_id: string;
+          instanceId: string;
+          workflowId: string;
           status: string;
-          message?: string;
-          approval_endpoint?: string;
           error?: string;
         }>({
-          appId: getPlannerDaprAgentAppId(),
+          appId: getWorkflowOrchestratorAppId(),
           method: "POST",
-          path: "/workflow/dapr",
+          path: "/api/v2/workflows",
           body: {
-            task,
-            repository: {
+            definition: AGENT_WORKFLOW_DEFINITION,
+            triggerData: {
               owner: targetRepository.owner,
               repo: targetRepository.repo,
               branch: targetRepository.branch || "main",
-              token: repoToken,
+              token: repoToken || "",
+              task,
             },
-            auto_approve: false, // Require human approval
           },
           timeout: 60000,
         });
 
         if (workflowResponse.ok && workflowResponse.data) {
-          const workflowId = workflowResponse.data.workflow_id;
+          const workflowId = workflowResponse.data.instanceId;
           console.log(
-            `[POST /api/agent/sessions] Workflow ${workflowId} started via planner-dapr-agent (Dapr)`
+            `[POST /api/agent/sessions] Workflow ${workflowId} started via workflow-orchestrator`
           );
 
           // Link workflow to session
@@ -157,7 +153,7 @@ export async function POST(request: NextRequest) {
             workflowStatus: "running",
           });
 
-          // Return session with workflowId and approval info
+          // Return session with workflowId
           return NextResponse.json({
             session: {
               ...agentSession,
@@ -167,8 +163,6 @@ export async function POST(request: NextRequest) {
             workflow: {
               id: workflowId,
               status: workflowResponse.data.status,
-              message: workflowResponse.data.message,
-              approvalEndpoint: workflowResponse.data.approval_endpoint,
             },
           });
         } else {

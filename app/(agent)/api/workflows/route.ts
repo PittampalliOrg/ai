@@ -18,17 +18,19 @@ import type { WorkflowStatus } from "@/lib/types/workflow";
 import type { WorkflowListItem as UIWorkflowListItem } from "@/lib/types/workflow-ui";
 import { mapWorkflowStatus } from "@/lib/transforms/workflow-ui";
 import { listWorkflows as listPatternWorkflows } from "@/lib/workflow-patterns/workflow-index";
+import { invokeService } from "@/lib/dapr/client";
 import { getConfig } from "@/lib/dapr/config-provider";
 
-// Service URLs from Dapr Configuration (Azure App Config) with fallbacks
-const getWorkflowServiceUrl = () =>
-  getConfig("WORKFLOW_SERVICE_URL", "http://workflow-orchestrator.dapr-agents.svc.cluster.local:80");
+// Dapr app IDs for cross-namespace service invocation
+const getWorkflowOrchestratorAppId = () =>
+  getConfig("WORKFLOW_ORCHESTRATOR_APP_ID", "workflow-orchestrator.workflow-builder");
 
+const getPlannerDaprAgentAppId = () =>
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent.workflow-builder");
+
+// Legacy planner-orchestrator URL (for older planner-* workflows)
 const getPlannerServiceUrl = () =>
-  getConfig("PLANNER_SERVICE_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
-
-const getPlannerDaprAgentUrl = () =>
-  getConfig("PLANNER_DAPR_AGENT_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
+  getConfig("PLANNER_SERVICE_URL", "http://planner-dapr-agent.workflow-builder.svc.cluster.local:8000");
 
 /**
  * GET /api/workflows
@@ -50,25 +52,24 @@ export async function GET(request: NextRequest) {
   let orchestratorError: string | undefined;
   let patternsError: string | undefined;
 
-  // Fetch from workflow-orchestrator service
+  // Fetch from workflow-orchestrator service via Dapr service invocation
   if (source === "all" || source === "orchestrator") {
     try {
-      const queryParams = new URLSearchParams({ limit: "100", offset: "0" });
+      const query: Record<string, string> = { limit: "100", offset: "0" };
       if (status) {
-        queryParams.set("status", status);
+        query.status = status;
       }
 
-      const response = await fetch(
-        `${getWorkflowServiceUrl()}/api/workflows?${queryParams.toString()}`,
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          next: { revalidate: 0 },
-        }
-      );
+      const response = await invokeService<{ workflows: unknown[] }>({
+        appId: getWorkflowOrchestratorAppId(),
+        method: "GET",
+        path: "/api/workflows",
+        query,
+        timeout: 15000,
+      });
 
       if (response.ok) {
-        const data = await response.json();
+        const data = response.data as { workflows: unknown[] };
 
         interface OrchestratorWorkflowIndex {
           id?: string;
@@ -85,9 +86,9 @@ export async function GET(request: NextRequest) {
           endTime?: string;
         }
 
-        const mapped: UIWorkflowListItem[] = (data.workflows || [])
-          .filter((w: OrchestratorWorkflowIndex) => w.id || w.instanceId) // Filter out invalid entries
-          .map((w: OrchestratorWorkflowIndex) => {
+        const mapped: UIWorkflowListItem[] = ((data.workflows || []) as OrchestratorWorkflowIndex[])
+          .filter((w) => w.id || w.instanceId) // Filter out invalid entries
+          .map((w) => {
             const instanceId = w.id || w.instanceId || "";
             const uiStatus = mapWorkflowStatus((w.status || "RUNNING") as WorkflowStatus);
             const startTime = w.submittedAt || w.createdAt || w.startTime || "";
@@ -188,20 +189,18 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // Fetch from planner-dapr-agent service
+  // Fetch from planner-dapr-agent service via Dapr service invocation
   if (source === "all" || source === "dapr-agent") {
     try {
-      const response = await fetch(
-        `${getPlannerDaprAgentUrl()}/workflows`,
-        {
-          method: "GET",
-          headers: { "Content-Type": "application/json" },
-          next: { revalidate: 0 },
-        }
-      );
+      const response = await invokeService<{ workflows: unknown[] }>({
+        appId: getPlannerDaprAgentAppId(),
+        method: "GET",
+        path: "/workflows",
+        timeout: 15000,
+      });
 
       if (response.ok) {
-        const data = await response.json();
+        const data = response.data as { workflows: unknown[] };
 
         interface DaprAgentWorkflow {
           instanceId: string;
@@ -215,8 +214,8 @@ export async function GET(request: NextRequest) {
           completedAt?: string;
         }
 
-        const workflows = data.workflows || [];
-        const mapped: UIWorkflowListItem[] = workflows.map((w: DaprAgentWorkflow) => {
+        const workflows = (data.workflows || []) as DaprAgentWorkflow[];
+        const mapped: UIWorkflowListItem[] = workflows.map((w) => {
           const uiStatus = mapWorkflowStatus(w.status.toUpperCase() as WorkflowStatus);
           return {
             instanceId: w.instanceId,

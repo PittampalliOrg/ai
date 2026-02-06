@@ -91,7 +91,7 @@
   },
   {
     "key": "WORKFLOW_SERVICE_URL",
-    "value": "http://planner-agent.planner-agent.svc.cluster.local:8080",
+    "value": "http://workflow-orchestrator.workflow-builder.svc.cluster.local:8080",
     "label": "ai-chatbot",
     "content_type": "",
     "tags": {
@@ -101,7 +101,7 @@
   },
   {
     "key": "PLANNER_SERVICE_URL",
-    "value": "http://planner-agent.planner-agent.svc.cluster.local:8080",
+    "value": "http://planner-dapr-agent.workflow-builder.svc.cluster.local:8000",
     "label": "ai-chatbot",
     "content_type": "",
     "tags": {
@@ -111,7 +111,37 @@
   },
   {
     "key": "PLANNER_AGENT_APP_ID",
-    "value": "planner-orchestrator.planner-agent",
+    "value": "planner-dapr-agent.workflow-builder",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
+    "key": "PLANNER_DAPR_AGENT_APP_ID",
+    "value": "planner-dapr-agent.workflow-builder",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
+    "key": "PLANNER_DAPR_AGENT_SERVICE_URL",
+    "value": "http://planner-dapr-agent.workflow-builder.svc.cluster.local:8000",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
+    "key": "WORKFLOW_ORCHESTRATOR_APP_ID",
+    "value": "workflow-orchestrator.workflow-builder",
     "label": "ai-chatbot",
     "content_type": "",
     "tags": {

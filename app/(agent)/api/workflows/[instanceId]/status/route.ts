@@ -4,8 +4,7 @@
  * GET /api/workflows/[instanceId]/status
  * Fetches workflow status from the appropriate backend based on workflow ID prefix:
  * - wf-* → planner-dapr-agent (via HTTP)
- * - planner-* → planner-orchestrator (via Dapr service invocation)
- * - Other → planner-orchestrator (via Dapr service invocation)
+ * - Other → workflow-orchestrator (via Dapr cross-namespace invocation)
  *
  * Benefits of Dapr service invocation:
  * - Automatic mTLS encryption between services
@@ -19,23 +18,28 @@ import { invokeService } from "@/lib/dapr/client";
 import { getConfig } from "@/lib/dapr/config-provider";
 
 // Service configuration from Dapr Configuration (Azure App Config)
-const getPlannerOrchestratorAppId = () =>
-  getConfig("PLANNER_AGENT_APP_ID", "planner-orchestrator.planner-agent");
+const getWorkflowOrchestratorAppId = () =>
+  getConfig("WORKFLOW_ORCHESTRATOR_APP_ID", "workflow-orchestrator.workflow-builder");
 
-const getPlannerDaprAgentUrl = () =>
-  getConfig("PLANNER_DAPR_AGENT_URL", "http://planner-dapr-agent.ai-chatbot.svc.cluster.local:8000");
+const getPlannerDaprAgentAppId = () =>
+  getConfig("PLANNER_DAPR_AGENT_APP_ID", "planner-dapr-agent.workflow-builder");
 
 /**
- * Response from the new planner-orchestrator (flat format)
+ * Response from workflow-orchestrator GET /api/v2/workflows/{id}/status
  */
 interface OrchestratorStatusResponse {
-  workflow_id: string;
-  runtime_status: string;
-  phase?: string;
+  instanceId: string;
+  workflowId: string;
+  runtimeStatus: string;
+  phase?: string | null;
   progress?: number;
-  message?: string;
-  output?: unknown;
-  error?: string;
+  message?: string | null;
+  currentNodeId?: string | null;
+  currentNodeName?: string | null;
+  outputs?: unknown;
+  error?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
 }
 
 /**
@@ -77,16 +81,31 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // Handle wf-* workflow IDs via planner-dapr-agent
+  // Handle wf-* workflow IDs via planner-dapr-agent (Dapr service invocation)
   if (instanceId.startsWith("wf-")) {
     try {
-      // Use /workflows/{id} endpoint which has phase, progress, plan data
-      const daprAgentUrl = `${getPlannerDaprAgentUrl()}/workflows/${instanceId}`;
-      console.log(`[Workflow Status] Fetching wf-* workflow from ${daprAgentUrl}`);
+      console.log(`[Workflow Status] Fetching wf-* workflow from ${getPlannerDaprAgentAppId()} via Dapr`);
 
-      const response = await fetch(daprAgentUrl, {
+      const response = await invokeService<{
+        instanceId: string;
+        status: string;
+        phase?: string;
+        progress?: number;
+        message?: string;
+        plan?: {
+          summary?: string;
+          tasks?: Array<{ id: string; subject: string; description: string; status: string }>;
+          tests?: Array<{ id: string; description: string }>;
+          reasoning?: string;
+        };
+        createdAt?: string;
+        updatedAt?: string;
+        error?: string;
+      }>({
+        appId: getPlannerDaprAgentAppId(),
         method: "GET",
-        headers: { "Content-Type": "application/json" },
+        path: `/workflows/${instanceId}`,
+        timeout: 15000,
       });
 
       if (!response.ok) {
@@ -102,8 +121,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
           } satisfies WorkflowStatusResponse);
         }
 
-        const errorText = await response.text();
-        console.error(`[Workflow Status] Planner Dapr Agent returned ${response.status}: ${errorText}`);
+        console.error(`[Workflow Status] Planner Dapr Agent returned ${response.status}: ${response.statusText}`);
         return NextResponse.json({
           success: false,
           instance_id: instanceId,
@@ -115,7 +133,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         } satisfies WorkflowStatusResponse);
       }
 
-      const data = await response.json() as {
+      const data = response.data as {
         instanceId: string;
         status: string;
         phase?: string;
@@ -161,14 +179,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
   }
 
-  // Handle other workflow IDs via Dapr service invocation to planner-orchestrator
+  // Handle other workflow IDs via Dapr service invocation to workflow-orchestrator
   try {
-    console.log(`[Workflow Status] Invoking ${getPlannerOrchestratorAppId()} via Dapr service invocation`);
+    console.log(`[Workflow Status] Invoking ${getWorkflowOrchestratorAppId()} via Dapr service invocation`);
 
     const response = await invokeService<OrchestratorStatusResponse>({
-      appId: getPlannerOrchestratorAppId(),
+      appId: getWorkflowOrchestratorAppId(),
       method: "GET",
-      path: `/api/workflows/${instanceId}/status`,
+      path: `/api/v2/workflows/${instanceId}/status`,
       timeout: 15000,
     });
 
@@ -199,19 +217,21 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       } satisfies WorkflowStatusResponse);
     }
 
-    // Map flat orchestrator response → nested UI format
+    // Map orchestrator response → nested UI format
     const data = response.data;
     return NextResponse.json({
       success: true,
-      instance_id: data?.workflow_id || instanceId,
-      runtime_status: data?.runtime_status || null,
+      instance_id: data?.instanceId || instanceId,
+      runtime_status: data?.runtimeStatus || null,
       custom_status: {
-        phase: data?.phase,
+        phase: data?.phase ?? undefined,
         progress: data?.progress,
-        message: data?.message,
+        message: data?.message ?? undefined,
+        currentNodeId: data?.currentNodeId ?? undefined,
+        currentNodeName: data?.currentNodeName ?? undefined,
       },
-      created_at: null,
-      last_updated_at: null,
+      created_at: data?.startedAt || null,
+      last_updated_at: data?.completedAt || null,
       error: data?.error || null,
     } satisfies WorkflowStatusResponse);
   } catch (error) {
