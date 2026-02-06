@@ -64,18 +64,26 @@ function mapEventType(type: string): string {
     task_started: "task_progress",
     task_completed: "task_completed",
     task_failed: "error",
-    // Phase events (from Dapr workflow activities)
-    phase_started: "task_progress",
-    phase_completed: "task_completed",
-    phase_failed: "error",
-    // Execution events
-    execution_started: "task_progress",
-    execution_completed: "task_completed",
-    execution_failed: "error",
+    // Phase events - pass through for dedicated PhaseStarted/Completed/Failed cards
+    phase_started: "phase_started",
+    phase_completed: "phase_completed",
+    phase_failed: "phase_failed",
+    // Execution events - pass through for dedicated handlers
+    execution_started: "execution_started",
+    execution_completed: "execution_completed",
+    execution_failed: "execution_failed",
     // File events - keep as separate type, NOT tool_result (to avoid matching confusion)
     file_changed: "file_changed",
-    // LLM events
+    // LLM events - pass through for activity tracking
     llm_chunk: "llm_chunk",
+    llm_start: "llm_start",
+    llm_end: "llm_end",
+    // Agent lifecycle events - pass through
+    agent_started: "agent_started",
+    agent_completed: "agent_completed",
+    // Activity lifecycle events - pass through
+    activity_started: "activity_started",
+    activity_completed: "activity_completed",
   };
   return typeMap[type] || type;
 }

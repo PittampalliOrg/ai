@@ -371,6 +371,30 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
             agentId: event.agentId,
           });
         }
+
+        // Extract synthetic file_changed from write-operation tool results
+        if (!isError && resultToolName) {
+          const writeTools = ["write_file", "write", "create", "str_replace_based_edit_tool", "edit"];
+          if (writeTools.includes(resultToolName.toLowerCase())) {
+            // Try to extract file path from the matched call's input or event data
+            const toolInput = (matchedCall?.toolInput || event.data.toolInput) as Record<string, unknown> | undefined;
+            const writePath = (
+              toolInput?.path || toolInput?.file_path || toolInput?.filePath || toolInput?.file
+            ) as string | undefined;
+            if (writePath) {
+              items.push({
+                id: `${event.id}-file`,
+                type: "file_changed",
+                timestamp: new Date(event.timestamp),
+                toolName: resultToolName.toLowerCase() === "create" ? "create" : "modify",
+                toolInput: { path: writePath },
+                toolOutput: `${resultToolName}: ${writePath}`,
+                status: "success",
+                agentId: event.agentId,
+              });
+            }
+          }
+        }
         break;
       }
 
@@ -563,6 +587,89 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
           phase: "execution",
           content: event.data.error as string || "Execution failed",
           status: "error",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      // LLM lifecycle events
+      case "llm_start": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "progress",
+          timestamp: new Date(event.timestamp),
+          content: event.data.llm_call as string || "LLM call started",
+          status: "running",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "llm_end": {
+        flushCurrent();
+        const durationMs = event.data.durationMs as number | undefined;
+        const durationStr = durationMs ? ` (${(durationMs / 1000).toFixed(1)}s)` : "";
+        items.push({
+          id: event.id,
+          type: "completed",
+          timestamp: new Date(event.timestamp),
+          content: `${event.data.llm_call as string || "LLM call"} completed${durationStr}`,
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      // Agent lifecycle events
+      case "agent_started": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_started",
+          timestamp: new Date(event.timestamp),
+          phase: "agent",
+          content: event.data.agent as string || "Agent started",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "agent_completed": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "phase_completed",
+          timestamp: new Date(event.timestamp),
+          phase: "agent",
+          content: event.data.agent as string || "Agent completed",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      // Generic activity lifecycle events
+      case "activity_started": {
+        flushCurrent();
+        items.push({
+          id: event.id,
+          type: "progress",
+          timestamp: new Date(event.timestamp),
+          content: event.data.activity as string || "Activity started",
+          status: "running",
+          agentId: event.agentId,
+        });
+        break;
+      }
+
+      case "activity_completed": {
+        flushCurrent();
+        const actDurationMs = event.data.durationMs as number | undefined;
+        const actDurationStr = actDurationMs ? ` (${(actDurationMs / 1000).toFixed(1)}s)` : "";
+        items.push({
+          id: event.id,
+          type: "completed",
+          timestamp: new Date(event.timestamp),
+          content: `${event.data.activity as string || "Activity"} completed${actDurationStr}`,
           agentId: event.agentId,
         });
         break;

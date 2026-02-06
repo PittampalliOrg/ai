@@ -31,6 +31,8 @@ interface WorkflowStreamEvent {
   type:
     | "initial"
     | "llm_chunk"
+    | "llm_start"
+    | "llm_end"
     | "thinking"  // Claude's extended thinking (internal reasoning)
     | "tool_call"
     | "tool_result"
@@ -38,9 +40,16 @@ interface WorkflowStreamEvent {
     | "task_completed"
     | "task_started"
     | "task_failed"
+    | "phase_started"
+    | "phase_completed"
+    | "phase_failed"
     | "execution_started"
     | "execution_completed"
     | "execution_failed"
+    | "agent_started"
+    | "agent_completed"
+    | "activity_started"
+    | "activity_completed"
     | "file_changed"
     | "heartbeat"
     | "error";
