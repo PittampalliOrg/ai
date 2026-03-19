@@ -10,6 +10,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { connection } from "next/server";
 import {
   getStaleWorkflows,
   updateAgentSessionWorkflowStatusByWorkflowId,
@@ -96,6 +97,8 @@ async function getDaprWorkflowStatus(
  * Reconcile stale workflows by querying Dapr runtime API
  */
 export async function GET() {
+  await connection();
+
   const startTime = Date.now();
   let synced = 0;
   let failed = 0;

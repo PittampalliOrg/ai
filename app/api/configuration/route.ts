@@ -7,6 +7,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { connection } from "next/server";
 import { getConfiguration, isAvailable } from "@/lib/dapr/client";
 import {
   getConfig,
@@ -152,6 +153,8 @@ interface ConfigurationResponse {
 const CONFIG_STORE = process.env.DAPR_CONFIG_STORE || "azureappconfig";
 
 export async function GET() {
+  await connection();
+
   // Check Dapr availability in real-time (don't rely on cached module state)
   const daprAvailable = await isAvailable();
 

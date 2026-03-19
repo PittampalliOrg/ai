@@ -4,7 +4,9 @@ const isDev = process.env.NODE_ENV === "development";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  cacheComponents: true,
+  // The app exposes many runtime API handlers that rely on request-time Dapr,
+  // auth, and cluster state. Cache Components makes Next 16 prerender them.
+  cacheComponents: false,
   // Prevent bundling of server-side packages that use dynamic requires
   serverExternalPackages: ["@dapr/dapr", "express"],
   images: {
