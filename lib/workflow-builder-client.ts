@@ -170,6 +170,8 @@ function getWorkflowBuilderInternalToken(): string {
 	return (
 		getSecretValue("WORKFLOW_BUILDER_INTERNAL_API_TOKEN") ||
 		getSecretValue("INTERNAL_API_TOKEN") ||
+		getConfig("WORKFLOW_BUILDER_INTERNAL_API_TOKEN") ||
+		getConfig("INTERNAL_API_TOKEN") ||
 		process.env.WORKFLOW_BUILDER_INTERNAL_API_TOKEN ||
 		process.env.INTERNAL_API_TOKEN ||
 		""
