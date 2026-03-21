@@ -24,23 +24,41 @@ imports:
 # App-specific variable values
 vars:
   APP_NAME: ai-chatbot
+  WORKLOAD_NAMESPACE: workflow-builder
   LOCAL_PORT: "3000"
   CONTAINER_PORT: "3000"
   SSH_PORT: "2222"
+  APP_PUBLIC_URL: "https://ai-chatbot-ryzen.tail286401.ts.net"
+  INTERNAL_API_TOKEN:
+    command: |
+      kubectl get secret workflow-builder-secrets -n workflow-builder -o jsonpath='{.data.INTERNAL_API_TOKEN}' 2>/dev/null | base64 -d || true
+    default: ""
   RUN_MIGRATIONS: "true"
   MIGRATION_COMMAND: "pnpm tsx lib/db/migrate"
   INSTALL_CLAUDE_CLI: "true"
+  CURRENT_IMAGE_TAG:
+    command: |
+      kubectl get deployment ${APP_NAME} -n ${WORKLOAD_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null |
+      sed 's/.*://' || echo "latest"
+    default: "latest"
+  CURRENT_PRODUCTION_IMAGE:
+    command: |
+      kubectl get deployment ${APP_NAME} -n ${WORKLOAD_NAMESPACE} -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null ||
+      echo "${GITEA_HOST}/${GITEA_USER}/${APP_NAME}:latest"
+    default: "${GITEA_HOST}/${GITEA_USER}/${APP_NAME}:latest"
 
 # Development configuration
 dev:
   app:
-    # Target the deployment by image selector
-    namespace: ${APP_NAME}
-    imageSelector: ${GITEA_HOST}/${GITEA_USER}/${APP_NAME}
+    # Target the live deployment by stable workload labels
+    namespace: ${WORKLOAD_NAMESPACE}
+    labelSelector:
+      app: ai-chatbot
+      app.kubernetes.io/name: ai-chatbot
     container: ${APP_NAME}
 
     # Use shared devcontainer (instead of per-app image)
-    devImage: ${GITEA_HOST}/${GITEA_USER}/nodejs-22-devspace:latest
+    devImage: node:22-bullseye
     workingDir: /app
 
     # Resource requirements for development
@@ -88,16 +106,28 @@ dev:
         pnpm tsx lib/db/migrate || echo "Migrations skipped (database may not be ready)"
 
         echo "Starting Next.js development server..."
-        exec pnpm dev
+        exec pnpm dev --hostname 0.0.0.0 --port ${CONTAINER_PORT}
 
     # File synchronization
     sync:
       - path: ./:/app
         initialSync: mirrorLocal
+        disableDownload: true
+        polling: true
         startContainer: true
         waitInitialSync: true
         onUpload:
           restartContainer: false
+          exec:
+            - name: install-dependencies
+              command: sh
+              args:
+                - -lc
+                - cd /app && corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate && pnpm install --frozen-lockfile
+              failOnError: true
+              onChange:
+                - package.json
+                - pnpm-lock.yaml
         excludePaths:
           # Node.js / Next.js artifacts
           - node_modules/
@@ -152,9 +182,15 @@ dev:
     # Patches to configure the pod for development
     patches:
       - op: remove
+        path: spec.initContainers
+      - op: remove
+        path: spec.containers.name=ai-chatbot-proxy
+      - op: remove
         path: spec.containers.name=${APP_NAME}.livenessProbe
       - op: remove
         path: spec.containers.name=${APP_NAME}.readinessProbe
+      - op: remove
+        path: spec.containers.name=${APP_NAME}.startupProbe
       - op: replace
         path: spec.containers.name=${APP_NAME}.securityContext
         value:
@@ -185,3 +221,13 @@ dev:
         value: development
       - name: NEXT_TELEMETRY_DISABLED
         value: "1"
+      - name: NEXT_PUBLIC_APP_URL
+        value: ${APP_PUBLIC_URL}
+      - name: APP_URL
+        value: ${APP_PUBLIC_URL}
+      - name: AUTH_URL
+        value: ${APP_PUBLIC_URL}
+      - name: NEXTAUTH_URL
+        value: ${APP_PUBLIC_URL}
+      - name: INTERNAL_API_TOKEN
+        value: ${INTERNAL_API_TOKEN}
