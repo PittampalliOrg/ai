@@ -19,6 +19,7 @@ import type { WorkflowEntry } from "@/lib/types/workflow";
 import { PlanApprovalSection } from "./plan-approval-section";
 import { AgentActivityTab } from "./agent-activity-tab";
 import { useTaskAggregation, type PlanStatus } from "@/hooks/use-task-aggregation";
+import type { UseAgentStreamReturn } from "@/hooks/use-agent-stream";
 
 // Export Workflow type alias for other components
 export type Workflow = WorkflowEntry | null;
@@ -47,6 +48,8 @@ interface AgentDetailPanelProps {
   onPlanApprove?: () => void;
   /** Callback when user rejects the plan */
   onPlanReject?: () => void;
+  /** Real-time agent activity stream data */
+  agentStream?: UseAgentStreamReturn;
 }
 
 export const AgentDetailPanel = memo(function AgentDetailPanel({
@@ -69,6 +72,7 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
   progress,
   onPlanApprove,
   onPlanReject,
+  agentStream,
 }: AgentDetailPanelProps) {
   // Use task aggregation to determine plan status for the activity tab
   const { planStatus } = useTaskAggregation(events);
@@ -97,10 +101,15 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
           </TabButton>
         </div>
         <div className="flex items-center gap-2">
-          {isConnected && (
+          {(isConnected || agentStream?.isConnected) && (
             <span className="flex items-center gap-1.5 text-xs text-green-500">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              Connected
+              {agentStream?.isConnected ? "Live" : "Connected"}
+            </span>
+          )}
+          {agentStream?.activeToolName && (
+            <span className="text-xs text-muted-foreground font-mono">
+              {agentStream.activeToolName}
             </span>
           )}
           <Button
@@ -126,6 +135,8 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
               title: t.title,
               description: t.description,
             }))}
+            onApprove={onPlanApprove}
+            onReject={onPlanReject}
           />
         </div>
       )}
@@ -142,6 +153,7 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
             onPlanApprove={onPlanApprove}
             onPlanReject={onPlanReject}
             className="h-full"
+            agentStream={agentStream}
           />
         ) : (
           <ScrollArea className="h-full">

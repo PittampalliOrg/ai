@@ -84,6 +84,16 @@ interface AgentActivityTabProps {
   onPlanApprove?: () => void;
   /** Callback when user rejects the plan */
   onPlanReject?: () => void;
+  /** Real-time agent activity stream */
+  agentStream?: {
+    events: Array<{ id: string; ts: string; type: string; toolName?: string; toolArgs?: unknown; toolResult?: unknown; output?: string; command?: string; token?: string; text?: string; phase?: string; error?: string; durationMs?: number; status?: string }>;
+    activeToolName: string | null;
+    isLlmStreaming: boolean;
+    llmTokenBuffer: string;
+    recentToolCalls: Array<{ id: string; ts: string; type: string; toolName?: string; toolArgs?: unknown; toolResult?: unknown; durationMs?: number; status?: string }>;
+    sandboxOutputs: Array<{ id: string; ts: string; type: string; command?: string; output?: string; exitCode?: number }>;
+    isConnected: boolean;
+  };
 }
 
 // Union type for AI SDK UI parts we handle
@@ -996,6 +1006,7 @@ export const AgentActivityTab = memo(function AgentActivityTab({
   isAwaitingApproval = false,
   onPlanApprove,
   onPlanReject,
+  agentStream,
 }: AgentActivityTabProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -1082,6 +1093,52 @@ export const AgentActivityTab = memo(function AgentActivityTab({
               }
               return <ActivityCard key={item.id} item={item} tasks={tasks} />;
             })}
+
+            {/* Real-time agent activity from SSE stream */}
+            {agentStream && agentStream.isConnected && (
+              <div className="space-y-2">
+                {/* LLM streaming indicator */}
+                {agentStream.isLlmStreaming && agentStream.llmTokenBuffer && (
+                  <div className="rounded-lg border border-border bg-muted/30 p-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <BotIcon className="size-3.5 text-blue-500" />
+                      <span className="text-xs font-medium text-blue-500">Agent Thinking</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono whitespace-pre-wrap line-clamp-6">
+                      {agentStream.llmTokenBuffer.slice(-500)}
+                    </p>
+                  </div>
+                )}
+
+                {/* Recent tool calls */}
+                {agentStream.recentToolCalls.slice(-5).map((tc) => (
+                  <div key={tc.id} className="rounded-lg border border-border bg-muted/20 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <CodeIcon className="size-3.5 text-muted-foreground" />
+                      <span className="text-xs font-mono font-medium">{tc.toolName || "tool"}</span>
+                      {(tc.type === "tool_call_start" || tc.type === "tool_start") && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      )}
+                      {(tc.type === "tool_call_end" || tc.type === "tool_complete") && (
+                        <CheckCircle2Icon className="size-3.5 text-green-500" />
+                      )}
+                      {tc.durationMs != null && (
+                        <span className="text-xs text-muted-foreground ml-auto">{tc.durationMs}ms</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Active tool name */}
+                {agentStream.activeToolName && !agentStream.isLlmStreaming && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    Running: <span className="font-mono">{agentStream.activeToolName}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Live streaming reasoning */}
             {isStreaming && accumulatedText && (
