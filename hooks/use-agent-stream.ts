@@ -136,11 +136,6 @@ export function useAgentStream({
 					lastEventIdRef.current = messageEvent.lastEventId;
 				}
 				processEvent(event);
-
-				if (event.type === "run_complete" || event.type === "run_error") {
-					source.close();
-					setIsConnected(false);
-				}
 			} catch {
 				// Ignore malformed events
 			}
