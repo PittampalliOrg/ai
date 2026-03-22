@@ -32,6 +32,10 @@ export async function GET(
   { params }: { params: Promise<{ instanceId: string }> },
 ) {
   const { instanceId } = await params;
+  const lastEventId =
+    request.headers.get("Last-Event-ID") ??
+    new URL(request.url).searchParams.get("lastEventId");
+
   const session = await getAgentSession({ id: instanceId }).catch(() => null);
   const targetExecutionId = session?.workflowId?.trim() || instanceId;
 
@@ -42,15 +46,11 @@ export async function GET(
   if (token) {
     upstreamHeaders["X-Internal-Token"] = token;
   }
-
-  const lastEventId =
-    request.headers.get("Last-Event-ID") ??
-    new URL(request.url).searchParams.get("lastEventId");
   if (lastEventId) {
     upstreamHeaders["Last-Event-ID"] = lastEventId;
   }
 
-  const streamUrl = `${getWorkflowBuilderBaseUrl()}/api/workflows/executions/${encodeURIComponent(targetExecutionId)}/agent-stream`;
+  const streamUrl = `${getWorkflowBuilderBaseUrl()}/api/internal/agent/workflows/executions/${encodeURIComponent(targetExecutionId)}/agent-stream`;
 
   let upstreamResponse: Response;
   try {

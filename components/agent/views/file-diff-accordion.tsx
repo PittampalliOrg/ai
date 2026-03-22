@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useEffect, useRef, memo } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,8 +14,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CodeBlock } from "@/components/ai-elements/code-block";
 import { ChevronDownIcon, ChevronUpIcon, FileIcon, CopyIcon, MoreIcon, CheckIcon } from "@/components/icons";
-import type { FileChange } from "@/hooks/use-agent-execution";
+import type { FileChange } from "@/contexts/workflow-execution-context";
 import { toast } from "sonner";
 import { computeDiff, flattenHunks } from "@/lib/diff/compute-diff";
 import { highlightHunks } from "@/lib/diff/highlight-diff";
@@ -35,6 +35,7 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
   const [highlightedHunks, setHighlightedHunks] = useState<DiffHunk[]>([]);
   const [isHighlighting, setIsHighlighting] = useState(false);
   const { viewMode, contentMode, setViewMode, setContentMode } = useDiffPreferences();
+  const hasSnapshotContent = file.oldContent !== null || file.newContent !== null;
 
   // Track previous inputs to avoid unnecessary re-highlighting
   const prevInputsRef = useRef<string>("");
@@ -49,6 +50,9 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
   const inputsKey = useMemo(() => {
     return `${file.path}|${file.oldContent?.length ?? 0}|${file.newContent?.length ?? 0}|${contentMode}`;
   }, [file.path, file.oldContent, file.newContent, contentMode]);
+  const showRawPatchFallback = !hasSnapshotContent && Boolean(file.rawPatch?.trim());
+  const additions = file.additions || diffResult.additions;
+  const deletions = file.deletions || diffResult.deletions;
 
   // Apply syntax highlighting asynchronously - only when inputs actually change
   useEffect(() => {
@@ -104,7 +108,7 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
 
   const handleCopyContent = async () => {
     try {
-      const content = file.newContent || file.oldContent || "";
+      const content = file.newContent || file.oldContent || file.rawPatch || "";
       await navigator.clipboard.writeText(content);
       toast.success("File content copied to clipboard");
     } catch {
@@ -114,6 +118,12 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
 
   const handleCopyDiff = async () => {
     try {
+      if (file.rawPatch) {
+        await navigator.clipboard.writeText(file.rawPatch);
+        toast.success("Diff copied to clipboard");
+        return;
+      }
+
       const lines = flattenHunks(diffResult.hunks);
       const diffText = lines
         .map((line) => {
@@ -164,15 +174,23 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
           )}
 
           {/* New badge (Codex green pill style) or Change stats */}
-          {file.isNew ? (
+          {file.status === "D" ? (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-500/15 text-red-600 dark:text-red-400 border border-red-500/30">
+              Deleted
+            </span>
+          ) : file.status === "R" ? (
+            <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+              Renamed
+            </span>
+          ) : file.isNew ? (
             <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
               New
             </span>
           ) : (
             <span className="text-xs font-mono tabular-nums">
-              <span className="text-emerald-600 dark:text-emerald-400">+{diffResult.additions}</span>
+              <span className="text-emerald-600 dark:text-emerald-400">+{additions}</span>
               {" "}
-              <span className="text-red-600 dark:text-red-400">-{diffResult.deletions}</span>
+              <span className="text-red-600 dark:text-red-400">-{deletions}</span>
             </span>
           )}
 
@@ -225,7 +243,24 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
       {/* Diff Content - scrollable for long files */}
       {isExpanded && (
         <div className="max-h-[500px] overflow-y-auto">
-          {viewMode === "unified" ? (
+          {file.oldPath && file.oldPath !== file.path && (
+            <div className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+              Renamed from <span className="font-mono text-foreground">{file.oldPath}</span>
+            </div>
+          )}
+
+          {showRawPatchFallback ? (
+            <div className="space-y-3 p-4">
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                Snapshot content is unavailable for this file, so this view is showing the persisted patch instead.
+              </div>
+              <CodeBlock
+                code={file.rawPatch || ""}
+                language="diff"
+                showLineNumbers
+              />
+            </div>
+          ) : viewMode === "unified" ? (
             <UnifiedDiffView hunks={highlightedHunks} isLoading={isHighlighting} />
           ) : (
             <SplitDiffView hunks={highlightedHunks} isLoading={isHighlighting} />

@@ -75,7 +75,8 @@ export function useAgentStream({
 				break;
 			case "sandbox_output_partial":
 				if (typeof event.output === "string") {
-					setActiveSandboxLines((prev) => [...prev, event.output]);
+					const outputLine = event.output;
+					setActiveSandboxLines((prev) => [...prev, outputLine]);
 				}
 				if (event.command) {
 					setActiveSandboxCommand(event.command);

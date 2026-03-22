@@ -75,6 +75,7 @@ interface AgentActivityTabProps {
   events: WorkflowStreamEvent[];
   accumulatedText: string;
   isStreaming?: boolean;
+  isWorkflowActive?: boolean;
   className?: string;
   /** Current workflow/plan status for showing approval UI */
   planStatus?: PlanStatus;
@@ -713,6 +714,20 @@ function agentStreamEventsToActivityItems(
   events: NonNullable<AgentActivityTabProps["agentStream"]>["events"],
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
+  const pendingToolCalls = new Map<string, ActivityItem>();
+
+  const getPendingToolKey = (
+    toolName?: string,
+    toolArgs?: unknown,
+  ): string | null => {
+    if (!toolName) {
+      return null;
+    }
+
+    const serializedArgs =
+      toolArgs == null ? "" : JSON.stringify(toolArgs, null, 0);
+    return `${toolName}:${serializedArgs}`;
+  };
 
   for (const event of events) {
     const timestamp = new Date(event.ts);
@@ -771,47 +786,96 @@ function agentStreamEventsToActivityItems(
         break;
 
       case "tool_start":
-      case "tool_call_start":
-        items.push({
+      case "tool_call_start": {
+        const toolItem: ActivityItem = {
           id: `agent-${event.id}`,
           type: "tool_call",
           timestamp,
           toolName: event.toolName,
           toolInput: event.toolArgs as Record<string, unknown> | undefined,
           status: "running",
-        });
+        };
+        items.push(toolItem);
+
+        const pendingKey = getPendingToolKey(event.toolName, event.toolArgs);
+        if (pendingKey) {
+          pendingToolCalls.set(pendingKey, toolItem);
+        }
         break;
+      }
 
       case "tool_complete":
-      case "tool_call_end":
-        items.push({
-          id: `agent-${event.id}`,
-          type: "tool_result",
-          timestamp,
-          toolName: event.toolName,
-          toolOutput:
-            typeof event.toolResult === "string"
-              ? event.toolResult
-              : event.toolResult != null
-                ? JSON.stringify(event.toolResult, null, 2)
-                : event.status === "nonzero_exit"
-                  ? "Command failed"
-                  : "Completed",
-          status: event.status === "nonzero_exit" ? "error" : "success",
-        });
+      case "tool_call_end": {
+        const toolOutput =
+          typeof event.toolResult === "string"
+            ? event.toolResult
+            : event.toolResult != null
+              ? JSON.stringify(event.toolResult, null, 2)
+              : event.status === "nonzero_exit"
+                ? "Command failed"
+                : "Completed";
+        const nextStatus = event.status === "nonzero_exit" ? "error" : "success";
+        const pendingKey = getPendingToolKey(event.toolName, event.toolArgs);
+        const matchedCall =
+          (pendingKey ? pendingToolCalls.get(pendingKey) : null) ||
+          items.find(
+            (item) =>
+              item.type === "tool_call" &&
+              item.status === "running" &&
+              item.toolName === event.toolName,
+          ) ||
+          null;
+
+        if (matchedCall) {
+          matchedCall.status = nextStatus;
+          matchedCall.toolOutput = toolOutput;
+          if (pendingKey) {
+            pendingToolCalls.delete(pendingKey);
+          }
+        } else {
+          items.push({
+            id: `agent-${event.id}`,
+            type: "tool_result",
+            timestamp,
+            toolName: event.toolName,
+            toolOutput,
+            status: nextStatus,
+          });
+        }
         break;
+      }
 
       case "tool_error":
-      case "tool_call_error":
-        items.push({
-          id: `agent-${event.id}`,
-          type: "tool_result",
-          timestamp,
-          toolName: event.toolName,
-          toolOutput: event.error || "Tool failed",
-          status: "error",
-        });
+      case "tool_call_error": {
+        const pendingKey = getPendingToolKey(event.toolName, event.toolArgs);
+        const matchedCall =
+          (pendingKey ? pendingToolCalls.get(pendingKey) : null) ||
+          items.find(
+            (item) =>
+              item.type === "tool_call" &&
+              item.status === "running" &&
+              item.toolName === event.toolName,
+          ) ||
+          null;
+
+        if (matchedCall) {
+          matchedCall.status = "error";
+          matchedCall.toolOutput = event.error || "Tool failed";
+          if (pendingKey) {
+            pendingToolCalls.delete(pendingKey);
+          }
+        } else {
+          items.push({
+            id: `agent-${event.id}`,
+            type: "tool_result",
+            timestamp,
+            toolName: event.toolName,
+            toolOutput: event.error || "Tool failed",
+            status: "error",
+          });
+        }
         break;
+      }
 
       case "sandbox_output_partial":
         items.push({
@@ -830,8 +894,9 @@ function agentStreamEventsToActivityItems(
           id: `agent-${event.id}`,
           type: "tool_result",
           timestamp,
-          toolName: "sandbox",
-          toolOutput: [event.command, event.output].filter(Boolean).join("\n\n"),
+          toolName: "shell",
+          toolInput: event.command ? { command: event.command } : undefined,
+          toolOutput: event.output || "Command completed",
           status: (event.exitCode ?? 0) === 0 ? "success" : "error",
         });
         break;
@@ -1135,6 +1200,7 @@ export const AgentActivityTab = memo(function AgentActivityTab({
   events,
   accumulatedText,
   isStreaming = false,
+  isWorkflowActive = false,
   className,
   planStatus,
   isAwaitingApproval = false,
@@ -1179,6 +1245,18 @@ export const AgentActivityTab = memo(function AgentActivityTab({
     () => groupActivityItems(filteredActivityItems),
     [filteredActivityItems]
   );
+  const hasLivePreview = Boolean(
+    agentStream?.isLlmStreaming ||
+      agentStream?.llmTokenBuffer ||
+      agentStream?.activeToolName ||
+      agentStream?.activeSandboxLines.length ||
+      agentStream?.activeSandboxCommand,
+  );
+  const shouldShowEmptyState =
+    groupedActivityItems.length === 0 &&
+    !accumulatedText &&
+    !hasActivePlan &&
+    !hasLivePreview;
 
   // Auto-scroll to bottom when new items arrive
   useEffect(() => {
@@ -1207,8 +1285,12 @@ export const AgentActivityTab = memo(function AgentActivityTab({
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto p-4 space-y-4"
       >
-        {groupedActivityItems.length === 0 && !accumulatedText && !hasActivePlan ? (
-          <EmptyState isAwaitingApproval={isAwaitingApproval || effectivePlanStatus === "awaiting_approval"} />
+        {shouldShowEmptyState ? (
+          <EmptyState
+            isAwaitingApproval={isAwaitingApproval || effectivePlanStatus === "awaiting_approval"}
+            isWorkflowActive={isWorkflowActive}
+            hasAgentStreamConnection={Boolean(agentStream?.isConnected)}
+          />
         ) : (
           <>
             {/* Aggregated Plan Card - shown at top when there are tasks */}
@@ -1239,10 +1321,7 @@ export const AgentActivityTab = memo(function AgentActivityTab({
 
             {/* Real-time agent activity from SSE stream */}
             {agentStream &&
-              (agentStream.isConnected ||
-                agentStream.events.length > 0 ||
-                agentStream.activeSandboxLines.length > 0 ||
-                !!agentStream.activeSandboxCommand) && (
+              hasLivePreview && (
               <div className="space-y-2">
                 {/* LLM streaming indicator */}
                 {agentStream.isLlmStreaming && agentStream.llmTokenBuffer && (
@@ -1258,36 +1337,23 @@ export const AgentActivityTab = memo(function AgentActivityTab({
                   </div>
                 )}
 
-                {/* Recent tool calls */}
-                {agentStream.recentToolCalls.slice(-5).map((tc) => (
-                  <div key={tc.id} className="rounded-lg border border-border bg-muted/20 p-2.5">
-                    <div className="flex items-center gap-2">
-                      <CodeIcon className="size-3.5 text-muted-foreground" />
-                      <span className="text-xs font-mono font-medium">{tc.toolName || "tool"}</span>
-                      {(tc.type === "tool_call_start" || tc.type === "tool_start") && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                      )}
-                      {(tc.type === "tool_call_end" || tc.type === "tool_complete") && (
-                        <CheckCircle2Icon className="size-3.5 text-green-500" />
-                      )}
-                      {tc.durationMs != null && (
-                        <span className="text-xs text-muted-foreground ml-auto">{tc.durationMs}ms</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-
                 {/* Active tool name */}
                 {agentStream.activeToolName && !agentStream.isLlmStreaming && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                    Running: <span className="font-mono">{agentStream.activeToolName}</span>
+                  <div className="rounded-lg border border-border bg-muted/20 p-2.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <CodeIcon className="size-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">Running tool</span>
+                      <span className="font-mono font-medium text-foreground">
+                        {agentStream.activeToolName}
+                      </span>
+                      <span className="ml-auto h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    </div>
                   </div>
                 )}
 
-                {(agentStream.sandboxOutputs.length > 0 || agentStream.activeSandboxCommand) && (
+                {(agentStream.activeSandboxLines.length > 0 || agentStream.activeSandboxCommand) && (
                   <SandboxTerminal
-                    outputs={agentStream.sandboxOutputs}
+                    outputs={[]}
                     activeSandboxLines={agentStream.activeSandboxLines}
                     activeSandboxCommand={agentStream.activeSandboxCommand}
                   />
@@ -1326,7 +1392,15 @@ export const AgentActivityTab = memo(function AgentActivityTab({
   );
 });
 
-const EmptyState = memo(function EmptyState({ isAwaitingApproval = false }: { isAwaitingApproval?: boolean }) {
+const EmptyState = memo(function EmptyState({
+  isAwaitingApproval = false,
+  isWorkflowActive = false,
+  hasAgentStreamConnection = false,
+}: {
+  isAwaitingApproval?: boolean;
+  isWorkflowActive?: boolean;
+  hasAgentStreamConnection?: boolean;
+}) {
   if (isAwaitingApproval) {
     // Don't show spinner when awaiting approval - workflow is paused
     return (
@@ -1337,10 +1411,26 @@ const EmptyState = memo(function EmptyState({ isAwaitingApproval = false }: { is
       </div>
     );
   }
+
+  if (isWorkflowActive || hasAgentStreamConnection) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+        <Loader className="mb-3" />
+        <p className="text-sm">Waiting for durable agent activity...</p>
+        <p className="mt-1 text-xs">
+          Live sandbox and tool events will appear here as the execution progresses.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
-      <Loader className="mb-3" />
-      <p className="text-sm">Waiting for agent activity...</p>
+      <AlertCircleIcon className="mb-3 size-8 text-muted-foreground/70" />
+      <p className="text-sm">No durable agent activity found for this run.</p>
+      <p className="mt-1 max-w-md text-center text-xs">
+        Older executions may only have coarse workflow state and no persisted sandbox event history.
+      </p>
     </div>
   );
 });
@@ -2568,6 +2658,7 @@ const SandboxTerminal = memo(function SandboxTerminal({
 }) {
   const liveOutputRef = useRef<HTMLPreElement>(null);
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const commandCount = outputs.length + (activeSandboxCommand ? 1 : 0);
 
   useEffect(() => {
     if (liveOutputRef.current) {
@@ -2579,7 +2670,7 @@ const SandboxTerminal = memo(function SandboxTerminal({
     <div className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 overflow-hidden">
       <div className="border-b border-zinc-800 px-3 py-1.5">
         <span className="text-xs font-medium text-zinc-400">
-          Sandbox Terminal ({outputs.length} command{outputs.length !== 1 ? "s" : ""})
+          Sandbox Activity ({commandCount} command{commandCount !== 1 ? "s" : ""})
         </span>
       </div>
       <div className="max-h-[300px] overflow-auto">

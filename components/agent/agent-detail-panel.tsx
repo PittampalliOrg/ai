@@ -32,7 +32,6 @@ interface AgentDetailPanelProps {
   onClose: () => void;
   fileChanges: Map<string, FileChange>;
   fileChangeArray: FileChange[];
-  fileStats: { additions: number; deletions: number };
   events: WorkflowStreamEvent[];
   logs: WorkflowLogEntry[];
   accumulatedText: string;
@@ -41,6 +40,8 @@ interface AgentDetailPanelProps {
   workflowId: string | null;
   isWorkflowActive: boolean;
   isAwaitingApproval: boolean;
+  isDiffLoading?: boolean;
+  hasDurableDiffs?: boolean;
   workflow: Workflow;
   statusMessage: string | null;
   progress: number | null;
@@ -58,7 +59,6 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
   onClose,
   fileChanges,
   fileChangeArray,
-  fileStats,
   events,
   logs,
   accumulatedText,
@@ -67,6 +67,8 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
   workflowId,
   isWorkflowActive,
   isAwaitingApproval,
+  isDiffLoading = false,
+  hasDurableDiffs = false,
   workflow,
   statusMessage,
   progress,
@@ -149,6 +151,7 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
             events={events}
             accumulatedText={accumulatedText}
             isStreaming={isStreaming}
+            isWorkflowActive={isWorkflowActive}
             planStatus={planStatus}
             isAwaitingApproval={isAwaitingApproval}
             onPlanApprove={onPlanApprove}
@@ -163,6 +166,9 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
               fileChangeArray={fileChangeArray}
               selectedFile={selectedFile}
               onFileSelect={setSelectedFile}
+              isLoading={isDiffLoading}
+              hasDurableDiffs={hasDurableDiffs}
+              isWorkflowActive={isWorkflowActive}
             />
           </ScrollArea>
         )}

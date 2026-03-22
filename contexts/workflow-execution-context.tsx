@@ -52,6 +52,9 @@ export interface FileChange {
   additions: number;
   deletions: number;
   isNew: boolean;
+  oldPath?: string;
+  status?: "A" | "M" | "D" | "R";
+  rawPatch?: string | null;
 }
 
 /**

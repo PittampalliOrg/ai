@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, memo } from "react";
-import type { FileChange } from "@/hooks/use-agent-execution";
+import type { FileChange } from "@/contexts/workflow-execution-context";
 import { FileDiffAccordion } from "./file-diff-accordion";
 
 interface DiffViewProps {
@@ -9,6 +9,9 @@ interface DiffViewProps {
   fileChangeArray: FileChange[]; // Stable array from hook
   selectedFile: string | null;
   onFileSelect: (path: string | null) => void;
+  isLoading?: boolean;
+  hasDurableDiffs?: boolean;
+  isWorkflowActive?: boolean;
 }
 
 export const DiffView = memo(function DiffView({
@@ -16,6 +19,9 @@ export const DiffView = memo(function DiffView({
   fileChangeArray,
   selectedFile,
   onFileSelect,
+  isLoading = false,
+  hasDurableDiffs = false,
+  isWorkflowActive = false,
 }: DiffViewProps) {
   // Calculate total stats using stable array
   const stats = useMemo(() => {
@@ -29,16 +35,24 @@ export const DiffView = memo(function DiffView({
       if (file.isNew) newFiles++;
     });
 
-    return { additions, deletions, newFiles, totalFiles: fileChangeArray.length };
-  }, [fileChangeArray]);
+    return { additions, deletions, newFiles, totalFiles: fileChanges.size };
+  }, [fileChangeArray, fileChanges]);
 
   if (fileChangeArray.length === 0) {
+    const helperText = isLoading
+      ? "Waiting for persisted file changes from the execution."
+      : hasDurableDiffs
+        ? isWorkflowActive
+          ? "The agent is running, but no durable file-change artifacts have been published yet."
+          : "No durable file-change artifacts were found for this run. Older runs may only have coarse workflow state."
+        : "Files will appear here when modified by the agent.";
+
     return (
       <div className="flex h-full items-center justify-center p-8 text-zinc-500">
         <p className="text-center">
-          No file changes to display.
+          {isLoading ? "Loading file changes..." : "No file changes to display."}
           <br />
-          <span className="text-sm">Files will appear here when modified by the agent.</span>
+          <span className="text-sm">{helperText}</span>
         </p>
       </div>
     );

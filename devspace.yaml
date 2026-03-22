@@ -25,7 +25,7 @@ imports:
 vars:
   APP_NAME: ai-chatbot
   WORKLOAD_NAMESPACE: workflow-builder
-  LOCAL_PORT: "3000"
+  LOCAL_PORT: "3003"
   CONTAINER_PORT: "3000"
   SSH_PORT: "2222"
   APP_PUBLIC_URL: "https://ai-chatbot-ryzen.tail286401.ts.net"

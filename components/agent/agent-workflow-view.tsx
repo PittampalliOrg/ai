@@ -19,6 +19,7 @@ import { useWorkflowExecution } from "@/contexts/workflow-execution-context";
 import { useWorkflow, useWorkflowStatus } from "@/hooks/use-workflows";
 import { useAgentSummary } from "@/hooks/use-agent-summary";
 import { useAgentStream } from "@/hooks/use-agent-stream";
+import { useExecutionChanges } from "@/hooks/use-execution-changes";
 
 // Components
 import { derivePhase, AgentPhaseIndicator } from "./agent-phase-indicator";
@@ -43,7 +44,6 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
     executionStatus,
     fileChanges,
     fileChangeArray,
-    fileChangeStats,
     logs,
     isConnected,
   } = useWorkflowExecution();
@@ -111,6 +111,10 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
     executionId: workflowId,
     enabled: !!workflowId,
   });
+  const durableExecutionChanges = useExecutionChanges({
+    executionId: workflowId,
+    refreshInterval: isWorkflowComplete ? 0 : 3000,
+  });
 
   // Override executionStatus based on backend status (more reliable)
   const derivedExecutionStatus = useMemo(() => {
@@ -135,11 +139,19 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   }, [isWorkflowComplete, normalizedRuntimeStatus, normalizedStatusPhase, executionStatus, isAwaitingApproval]);
 
   const taskPrompt = externalTaskPrompt ?? contextTaskPrompt;
+  const effectiveFileChanges =
+    durableExecutionChanges.hasLoaded && durableExecutionChanges.fileChangeArray.length > 0
+      ? durableExecutionChanges.fileChanges
+      : fileChanges;
+  const effectiveFileChangeArray =
+    durableExecutionChanges.hasLoaded && durableExecutionChanges.fileChangeArray.length > 0
+      ? durableExecutionChanges.fileChangeArray
+      : fileChangeArray;
 
   // Use the agent summary hook
   const summary = useAgentSummary({
     events,
-    fileChangeArray,
+    fileChangeArray: effectiveFileChangeArray,
     plan: workflow?.plan,
     isStreaming,
     taskPrompt,
@@ -248,9 +260,8 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
             activeTab={activeDetailTab}
             onTabChange={setActiveDetailTab}
             onClose={handleCloseDetailPanel}
-            fileChanges={fileChanges}
-            fileChangeArray={fileChangeArray}
-            fileStats={fileChangeStats}
+            fileChanges={effectiveFileChanges}
+            fileChangeArray={effectiveFileChangeArray}
             events={events}
             logs={logs}
             accumulatedText={accumulatedText}
@@ -259,6 +270,8 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
             workflowId={workflowId}
             isWorkflowActive={isWorkflowActive}
             isAwaitingApproval={isAwaitingApproval}
+            isDiffLoading={durableExecutionChanges.isLoading}
+            hasDurableDiffs={durableExecutionChanges.hasLoaded}
             workflow={workflow}
             statusMessage={statusMessage}
             progress={progress}
@@ -331,7 +344,7 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
       )}
 
       {/* Empty state when panel is closed, workflow inactive, but has content */}
-      {!isDetailPanelOpen && !isWorkflowActive && (fileChangeArray.length > 0 || events.length > 0) && (
+      {!isDetailPanelOpen && !isWorkflowActive && (effectiveFileChangeArray.length > 0 || events.length > 0) && (
         <div className="flex-1 flex items-center justify-center bg-muted/30">
           <div className="text-center space-y-2">
             <p className="text-sm text-muted-foreground">
