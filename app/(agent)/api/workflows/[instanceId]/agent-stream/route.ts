@@ -6,6 +6,7 @@
  */
 
 import { getConfig, getSecretValue } from "@/lib/dapr/config-provider";
+import { getAgentSession } from "@/lib/db/agent-queries";
 
 export const maxDuration = 1800;
 
@@ -31,6 +32,8 @@ export async function GET(
   { params }: { params: Promise<{ instanceId: string }> },
 ) {
   const { instanceId } = await params;
+  const session = await getAgentSession({ id: instanceId }).catch(() => null);
+  const targetExecutionId = session?.workflowId?.trim() || instanceId;
 
   const token = getInternalToken();
   const upstreamHeaders: Record<string, string> = {
@@ -40,12 +43,14 @@ export async function GET(
     upstreamHeaders["X-Internal-Token"] = token;
   }
 
-  const lastEventId = request.headers.get("Last-Event-ID");
+  const lastEventId =
+    request.headers.get("Last-Event-ID") ??
+    new URL(request.url).searchParams.get("lastEventId");
   if (lastEventId) {
     upstreamHeaders["Last-Event-ID"] = lastEventId;
   }
 
-  const streamUrl = `${getWorkflowBuilderBaseUrl()}/api/workflows/executions/${encodeURIComponent(instanceId)}/agent-stream`;
+  const streamUrl = `${getWorkflowBuilderBaseUrl()}/api/workflows/executions/${encodeURIComponent(targetExecutionId)}/agent-stream`;
 
   let upstreamResponse: Response;
   try {

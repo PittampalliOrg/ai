@@ -1,8 +1,8 @@
 "use client";
 
-import { use, useState, useEffect, useCallback } from "react";
+import { use, useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { useWorkflow } from "@/hooks/use-workflows";
+import { useWorkflow, useWorkflowStatus } from "@/hooks/use-workflows";
 import { WorkflowDetail, WorkflowDetailSkeleton } from "@/components/workflows/workflow-detail";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -10,9 +10,49 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, RefreshCw, AlertCircle, Radio } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import type { WorkflowStatus } from "@/lib/types/workflow";
 
 interface WorkflowDetailPageProps {
   params: Promise<{ instanceId: string }>;
+}
+
+function deriveWorkflowStatus(phase: string | null, runtimeStatus: string | null): WorkflowStatus | null {
+  const normalizedPhase = phase?.toLowerCase() || "";
+  const normalizedRuntimeStatus = runtimeStatus?.toUpperCase() || "";
+
+  if (normalizedPhase === "awaiting_approval" || normalizedRuntimeStatus === "AWAITING_APPROVAL") {
+    return "AWAITING_APPROVAL";
+  }
+
+  if (normalizedPhase === "executing" || normalizedPhase === "execution") {
+    return "EXECUTING";
+  }
+
+  if (normalizedPhase === "planning" || normalizedPhase === "plan") {
+    return "PLANNING";
+  }
+
+  if (normalizedPhase === "completed" || normalizedRuntimeStatus === "COMPLETED") {
+    return "COMPLETED";
+  }
+
+  if (normalizedPhase === "rejected" || normalizedRuntimeStatus === "REJECTED") {
+    return "REJECTED";
+  }
+
+  if (
+    normalizedPhase === "failed" ||
+    normalizedPhase === "tests_failed" ||
+    normalizedRuntimeStatus === "FAILED"
+  ) {
+    return "FAILED";
+  }
+
+  if (normalizedRuntimeStatus === "RUNNING") {
+    return "EXECUTING";
+  }
+
+  return null;
 }
 
 /**
@@ -25,21 +65,41 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
   const { instanceId } = use(params);
   const decodedInstanceId = decodeURIComponent(instanceId);
   const { workflow, isLoading, isError, error, mutate } = useWorkflow(decodedInstanceId);
+  const {
+    phase: statusPhase,
+    runtimeStatus,
+    mutate: mutateStatus,
+  } = useWorkflowStatus(decodedInstanceId, 2000);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [isApproving, setIsApproving] = useState(false);
+  const effectiveWorkflow = useMemo(() => {
+    if (!workflow) {
+      return null;
+    }
+
+    const liveStatus = deriveWorkflowStatus(statusPhase, runtimeStatus);
+    if (!liveStatus) {
+      return workflow;
+    }
+
+    return {
+      ...workflow,
+      status: liveStatus,
+    };
+  }, [runtimeStatus, statusPhase, workflow]);
 
   // Track when data is refreshed
   useEffect(() => {
-    if (workflow) {
+    if (effectiveWorkflow) {
       setLastRefresh(new Date());
     }
-  }, [workflow]);
+  }, [effectiveWorkflow]);
 
   // Determine if workflow is active (needs live monitoring)
-  const isActive = workflow?.status === "in_progress" ||
-    workflow?.status === "PLANNING" ||
-    workflow?.status === "AWAITING_APPROVAL" ||
-    workflow?.status === "EXECUTING";
+  const isActive = effectiveWorkflow?.status === "in_progress" ||
+    effectiveWorkflow?.status === "PLANNING" ||
+    effectiveWorkflow?.status === "AWAITING_APPROVAL" ||
+    effectiveWorkflow?.status === "EXECUTING";
 
   // Handle workflow approval
   const handleApprove = useCallback(async () => {
@@ -63,7 +123,7 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
       });
 
       // Refresh workflow data
-      mutate();
+      await Promise.all([mutate(), mutateStatus()]);
     } catch (err) {
       toast.error("Failed to approve workflow", {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -71,7 +131,7 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
     } finally {
       setIsApproving(false);
     }
-  }, [decodedInstanceId, mutate]);
+  }, [decodedInstanceId, mutate, mutateStatus]);
 
   // Handle workflow rejection
   const handleReject = useCallback(async () => {
@@ -95,7 +155,7 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
       });
 
       // Refresh workflow data
-      mutate();
+      await Promise.all([mutate(), mutateStatus()]);
     } catch (err) {
       toast.error("Failed to reject workflow", {
         description: err instanceof Error ? err.message : "Unknown error",
@@ -103,7 +163,7 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
     } finally {
       setIsApproving(false);
     }
-  }, [decodedInstanceId, mutate]);
+  }, [decodedInstanceId, mutate, mutateStatus]);
 
   return (
     <div className="flex flex-col h-full">
@@ -118,7 +178,7 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
           </Link>
           <div>
             <h1 className="text-xl font-bold">
-              {workflow?.plan?.title || "Workflow Details"}
+              {effectiveWorkflow?.plan?.title || "Workflow Details"}
             </h1>
             <p className="text-sm text-muted-foreground font-mono">
               {decodedInstanceId}
@@ -148,7 +208,9 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
           <Button
             variant="outline"
             size="sm"
-            onClick={() => mutate()}
+            onClick={() => {
+              void Promise.all([mutate(), mutateStatus()]);
+            }}
             disabled={isLoading}
           >
             <RefreshCw
@@ -173,14 +235,39 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
 
         {isLoading && !workflow ? (
           <WorkflowDetailSkeleton />
-        ) : workflow ? (
+        ) : effectiveWorkflow ? (
           <WorkflowDetail
-            workflow={workflow}
+            workflow={effectiveWorkflow}
             onApprove={handleApprove}
             onReject={handleReject}
             isApproving={isApproving}
           />
-        ) : !isError ? (
+        ) : isError ? (
+          <div className="text-center py-12">
+            <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-4" />
+            <p className="text-muted-foreground mb-4">
+              {error?.message || "Failed to load workflow details."}
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void Promise.all([mutate(), mutateStatus()]);
+                }}
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+              <Link href="/workflows">
+                <Button variant="ghost" size="sm">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to list
+                </Button>
+              </Link>
+            </div>
+          </div>
+        ) : (
           <div className="text-center py-12">
             <p className="text-muted-foreground">Workflow not found</p>
             <Link href="/workflows">
@@ -189,7 +276,7 @@ export default function WorkflowDetailPage({ params }: WorkflowDetailPageProps) 
               </Button>
             </Link>
           </div>
-        ) : null}
+        )}
       </main>
     </div>
   );

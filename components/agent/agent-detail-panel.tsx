@@ -76,6 +76,7 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
 }: AgentDetailPanelProps) {
   // Use task aggregation to determine plan status for the activity tab
   const { planStatus } = useTaskAggregation(events);
+  const activityCount = logs.length + (agentStream?.events.length ?? 0);
 
   // State for selected file in diff view
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -88,7 +89,7 @@ export const AgentDetailPanel = memo(function AgentDetailPanel({
           <TabButton
             active={activeTab === "logs"}
             onClick={() => onTabChange("logs")}
-            count={logs.length}
+            count={activityCount}
           >
             Logs
           </TabButton>

@@ -1,25 +1,6 @@
-/**
- * Workflow Tasks API
- *
- * GET /api/workflows/[instanceId]/tasks
- * Proxies task retrieval to the planner-orchestrator service using Dapr service invocation.
- *
- * The orchestrator stores tasks in Dapr statestore after the planning phase.
- * This endpoint retrieves them for human review before approval.
- *
- * Benefits of Dapr service invocation:
- * - Automatic mTLS encryption between services
- * - Built-in retries and circuit breakers
- * - Distributed tracing for observability
- * - Service discovery via app-id (no hardcoded URLs)
- */
-
 import { NextResponse, type NextRequest } from "next/server";
-import { invokeService } from "@/lib/dapr/client";
-
-// Planner orchestrator Dapr app ID
-// Use namespace-qualified app ID for cross-namespace Dapr invocation
-const PLANNER_ORCHESTRATOR_APP_ID = process.env.PLANNER_AGENT_APP_ID || "planner-orchestrator.planner-agent";
+import { getAgentSession } from "@/lib/db/agent-queries";
+import { getWorkflowBuilderExecutionDetail } from "@/lib/workflow-builder-client";
 
 interface RouteParams {
   params: Promise<{ instanceId: string }>;
@@ -35,16 +16,29 @@ interface OrchestratorTask {
   blockedBy?: string[];
 }
 
-interface OrchestratorTasksResponse {
+interface WorkflowTasksResponse {
   workflow_id: string;
   tasks: OrchestratorTask[];
   count: number;
 }
 
+async function getWorkflowBuilderDetail(instanceId: string) {
+  const directDetail = await getWorkflowBuilderExecutionDetail(instanceId);
+  if (directDetail) {
+    return directDetail;
+  }
+
+  const session = await getAgentSession({ id: instanceId }).catch(() => null);
+  const linkedExecutionId = session?.workflowId?.trim();
+  if (!linkedExecutionId) {
+    return null;
+  }
+
+  return getWorkflowBuilderExecutionDetail(linkedExecutionId);
+}
+
 /**
- * GET /api/workflows/[instanceId]/tasks
- *
- * Fetches tasks from the planner-orchestrator's Dapr statestore.
+ * Returns plan tasks from the workflow-builder plan artifact.
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   const { instanceId } = await params;
@@ -57,32 +51,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    console.log(`[Workflow Tasks] Invoking ${PLANNER_ORCHESTRATOR_APP_ID} via Dapr service invocation`);
-
-    const response = await invokeService<OrchestratorTasksResponse>({
-      appId: PLANNER_ORCHESTRATOR_APP_ID,
-      method: "GET",
-      path: `/api/workflows/${instanceId}/tasks`,
-      timeout: 15000,
-    });
-
-    if (!response.ok) {
-      if (response.status === 404) {
-        return NextResponse.json({
-          workflow_id: instanceId,
-          tasks: [],
-          count: 0,
-        });
-      }
-
-      console.error(`[Workflow Tasks] Service returned ${response.status}: ${response.statusText}`);
+    const detail = await getWorkflowBuilderDetail(instanceId);
+    if (!detail) {
       return NextResponse.json(
-        { error: `Service error: ${response.status}` },
-        { status: response.status }
+        { error: `Workflow with ID "${instanceId}" not found` },
+        { status: 404 }
       );
     }
 
-    return NextResponse.json(response.data);
+    const tasks = deriveTasksFromPlanArtifact(detail.planArtifact?.planJson);
+    return NextResponse.json({
+      workflow_id: detail.execution.id,
+      tasks,
+      count: tasks.length,
+    } satisfies WorkflowTasksResponse);
   } catch (error) {
     console.error(`[Workflow Tasks] Error fetching tasks:`, error);
 
@@ -91,4 +73,34 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       { status: 500 }
     );
   }
+}
+
+function deriveTasksFromPlanArtifact(planJson: unknown): OrchestratorTask[] {
+  if (!planJson || typeof planJson !== "object") {
+    return [];
+  }
+
+  const tasks = (planJson as Record<string, unknown>).tasks;
+  if (!Array.isArray(tasks)) {
+    return [];
+  }
+
+  return tasks
+    .filter((task) => task && typeof task === "object")
+    .map((task) => {
+      const record = task as Record<string, unknown>;
+      return {
+        id: String(record.id ?? ""),
+        subject: String(record.subject ?? record.title ?? ""),
+        description: String(record.description ?? ""),
+        status: String(record.status ?? "pending"),
+        blocks: Array.isArray(record.blocks)
+          ? record.blocks.map((value) => String(value))
+          : undefined,
+        blockedBy: Array.isArray(record.blockedBy)
+          ? record.blockedBy.map((value) => String(value))
+          : undefined,
+      };
+    })
+    .filter((task) => Boolean(task.id && task.subject));
 }

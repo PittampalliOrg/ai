@@ -15,6 +15,8 @@ export type AgentStreamEventType =
 	| "tool_call_end"
 	| "tool_call_error"
 	| "sandbox_output"
+	| "sandbox_output_partial"
+	| "sandbox_heartbeat"
 	| "state_snapshot"
 	| "run_complete"
 	| "run_error"
@@ -43,5 +45,10 @@ export type AgentStreamEvent = {
 	phase?: string;
 	error?: string;
 	finishReason?: string;
+	elapsedSeconds?: number;
+	sandboxStatus?: string;
+	sandboxPhase?: string;
+	runId?: string;
+	stream?: "stdout" | "stderr";
 	meta?: Record<string, unknown>;
 };

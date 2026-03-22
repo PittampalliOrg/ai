@@ -544,6 +544,9 @@ export function toWorkflowListItem(
   } else if (workflow.source === "dapr-agent") {
     workflowType = workflow.workflowType || "planner_workflow";
     appId = "planner-dapr-agent";
+  } else if (workflow.source === "workflow-builder") {
+    workflowType = workflow.workflowType || DEFAULT_WORKFLOW_TYPE;
+    appId = "workflow-builder";
   } else if (workflow.source === "patterns" && workflow.workflowType) {
     workflowType = `${workflow.workflowType}Workflow`;
     appId = "workflow-patterns";
@@ -597,9 +600,12 @@ export function transformWorkflowListItem(
   const workflowType = item.source === "patterns" && item.workflowType
     ? `${item.workflowType}Workflow`
     : DEFAULT_WORKFLOW_TYPE;
-  const appId = item.source === "patterns"
-    ? "workflow-patterns"
-    : DEFAULT_APP_ID;
+  const appId =
+    item.source === "patterns"
+      ? "workflow-patterns"
+      : item.source === "workflow-builder"
+        ? "workflow-builder"
+        : DEFAULT_APP_ID;
 
   return {
     instanceId: item.instanceId,

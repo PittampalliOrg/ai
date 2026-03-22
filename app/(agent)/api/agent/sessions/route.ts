@@ -8,14 +8,8 @@ import {
   updateAgentSessionWorkflow,
 } from "@/lib/db/agent-queries";
 import { verifyUserExists } from "@/lib/db/queries";
-import { invokeService } from "@/lib/dapr/client";
 import { getRepoAccessToken } from "@/lib/github/app-auth";
-import { getConfig } from "@/lib/dapr/config-provider";
-import { AGENT_WORKFLOW_DEFINITION } from "@/lib/workflows/agent-workflow-definition";
-
-// Workflow orchestrator Dapr app ID (cross-namespace invocation to workflow-builder)
-const getWorkflowOrchestratorAppId = () =>
-  getConfig("WORKFLOW_ORCHESTRATOR_APP_ID", "workflow-orchestrator.workflow-builder");
+import { startWorkflowBuilderCodingAgentExecution } from "@/lib/workflow-builder-client";
 
 /**
  * GET /api/agent/sessions
@@ -90,8 +84,8 @@ export async function POST(request: NextRequest) {
       repoPath,
     });
 
-    // Start workflow if requested (atomic session + workflow creation)
-    // Uses workflow-orchestrator for 5-node workflow: Clone → Plan → Approve → Execute
+    // Start workflow if requested (session + workflow execution creation)
+    // Uses a saved workflow-builder system workflow backed by dapr-agent/run.
     if (task && startWorkflow && targetRepository) {
       try {
         console.log(
@@ -116,69 +110,70 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        // Call workflow-orchestrator's workflow API via Dapr service invocation
-        // This uses the 5-node workflow: Clone → Plan → Approve → Execute
-        const workflowResponse = await invokeService<{
-          instanceId: string;
-          workflowId: string;
-          status: string;
-          error?: string;
-        }>({
-          appId: getWorkflowOrchestratorAppId(),
-          method: "POST",
-          path: "/api/v2/workflows",
-          body: {
-            definition: AGENT_WORKFLOW_DEFINITION,
-            triggerData: {
-              owner: targetRepository.owner,
-              repo: targetRepository.repo,
-              branch: targetRepository.branch || "main",
-              token: repoToken || "",
-              task,
-            },
+        const workflowResponse = await startWorkflowBuilderCodingAgentExecution({
+          task,
+          userId: session.user.id,
+          sessionId: agentSession.id,
+          targetRepository: {
+            owner: targetRepository.owner,
+            repo: targetRepository.repo,
+            branch: targetRepository.branch || "main",
+            token: repoToken,
           },
-          timeout: 60000,
         });
 
-        if (workflowResponse.ok && workflowResponse.data) {
-          const workflowId = workflowResponse.data.instanceId;
-          console.log(
-            `[POST /api/agent/sessions] Workflow ${workflowId} started via workflow-orchestrator`
-          );
+        if (!workflowResponse.success) {
+          throw new Error("Workflow-builder execution did not start successfully");
+        }
 
-          // Link workflow to session
-          await updateAgentSessionWorkflow({
-            id: agentSession.id,
+        const workflowId = workflowResponse.executionId;
+        const workflowResult = {
+          id: workflowId,
+          status: workflowResponse.status,
+          daprInstanceId: workflowResponse.instanceId,
+          savedWorkflowId: workflowResponse.workflowId,
+          savedWorkflowName: workflowResponse.workflowName,
+        };
+
+        console.log(
+          `[POST /api/agent/sessions] Workflow execution ${workflowId} started via workflow-builder`
+        );
+
+        // Link workflow to session
+        await updateAgentSessionWorkflow({
+          id: agentSession.id,
+          workflowId,
+          workflowStatus: "running",
+        });
+
+        // Return session with workflowId
+        return NextResponse.json({
+          session: {
+            ...agentSession,
             workflowId,
             workflowStatus: "running",
-          });
-
-          // Return session with workflowId
-          return NextResponse.json({
-            session: {
-              ...agentSession,
-              workflowId,
-              workflowStatus: "running",
-            },
-            workflow: {
-              id: workflowId,
-              status: workflowResponse.data.status,
-            },
-          });
-        } else {
-          const errorMsg = workflowResponse.data?.error || `HTTP ${workflowResponse.status}`;
-          console.error(
-            `[POST /api/agent/sessions] Failed to start workflow: ${errorMsg}`
-          );
-        }
-        // Session created but workflow failed - return session anyway
-        // The user can still use the legacy AgentChat view
+          },
+          workflow: workflowResult,
+        });
       } catch (workflowError) {
         console.error(
           "[POST /api/agent/sessions] Failed to start workflow:",
           workflowError
         );
-        // Session created but workflow failed - return session anyway
+
+        await deleteAgentSession({ id: agentSession.id }).catch((deleteError) => {
+          console.error(
+            `[POST /api/agent/sessions] Failed to roll back session ${agentSession.id}:`,
+            deleteError
+          );
+        });
+
+        return NextResponse.json(
+          {
+            error: "Failed to start coding workflow",
+          },
+          { status: 502 }
+        );
       }
     }
 

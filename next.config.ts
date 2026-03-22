@@ -5,6 +5,12 @@ const isDev = process.env.NODE_ENV === "development";
 const nextConfig: NextConfig = {
   output: "standalone",
   cacheComponents: true,
+  allowedDevOrigins: [
+    "ai-chatbot-ryzen.tail286401.ts.net",
+    "workflow-builder-ryzen.tail286401.ts.net",
+    "localhost",
+    "127.0.0.1",
+  ],
   // Prevent bundling of server-side packages that use dynamic requires
   serverExternalPackages: ["@dapr/dapr", "express"],
   images: {

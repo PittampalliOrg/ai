@@ -109,7 +109,7 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   // Real-time agent activity stream (LLM tokens, tool calls, sandbox output)
   const agentStream = useAgentStream({
     executionId: workflowId,
-    enabled: isWorkflowActive,
+    enabled: !!workflowId,
   });
 
   // Override executionStatus based on backend status (more reliable)
