@@ -84,6 +84,18 @@ interface AgentActivityTabProps {
   onPlanApprove?: () => void;
   /** Callback when user rejects the plan */
   onPlanReject?: () => void;
+  /** Real-time agent activity stream */
+  agentStream?: {
+    events: Array<{ id: string; ts: string; type: string; toolName?: string; toolArgs?: unknown; toolResult?: unknown; output?: string; command?: string; token?: string; text?: string; phase?: string; error?: string; durationMs?: number; status?: string; exitCode?: number }>;
+    activeToolName: string | null;
+    isLlmStreaming: boolean;
+    llmTokenBuffer: string;
+    recentToolCalls: Array<{ id: string; ts: string; type: string; toolName?: string; toolArgs?: unknown; toolResult?: unknown; durationMs?: number; status?: string }>;
+    sandboxOutputs: Array<{ id: string; ts: string; type: string; command?: string; output?: string; exitCode?: number }>;
+    activeSandboxLines: string[];
+    activeSandboxCommand: string | null;
+    isConnected: boolean;
+  };
 }
 
 // Union type for AI SDK UI parts we handle
@@ -697,6 +709,138 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
   return items;
 }
 
+function agentStreamEventsToActivityItems(
+  events: NonNullable<AgentActivityTabProps["agentStream"]>["events"],
+): ActivityItem[] {
+  const items: ActivityItem[] = [];
+
+  for (const event of events) {
+    const timestamp = new Date(event.ts);
+
+    switch (event.type) {
+      case "run_started":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "phase_started",
+          timestamp,
+          phase: event.phase,
+          content: event.phase ? `Run started (${event.phase})` : "Run started",
+        });
+        break;
+
+      case "run_complete":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "phase_completed",
+          timestamp,
+          phase: event.phase,
+          content: event.phase ? `Run completed (${event.phase})` : "Run completed",
+        });
+        break;
+
+      case "run_error":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "phase_failed",
+          timestamp,
+          phase: event.phase,
+          content: event.error || "Run failed",
+          status: "error",
+        });
+        break;
+
+      case "model_start":
+      case "llm_start":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "progress",
+          timestamp,
+          content: event.phase ? `Model started (${event.phase})` : "Model started",
+          status: "running",
+        });
+        break;
+
+      case "model_complete":
+      case "llm_complete":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "completed",
+          timestamp,
+          content: event.phase ? `Model completed (${event.phase})` : "Model completed",
+        });
+        break;
+
+      case "tool_start":
+      case "tool_call_start":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "tool_call",
+          timestamp,
+          toolName: event.toolName,
+          toolInput: event.toolArgs as Record<string, unknown> | undefined,
+          status: "running",
+        });
+        break;
+
+      case "tool_complete":
+      case "tool_call_end":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "tool_result",
+          timestamp,
+          toolName: event.toolName,
+          toolOutput:
+            typeof event.toolResult === "string"
+              ? event.toolResult
+              : event.toolResult != null
+                ? JSON.stringify(event.toolResult, null, 2)
+                : event.status === "nonzero_exit"
+                  ? "Command failed"
+                  : "Completed",
+          status: event.status === "nonzero_exit" ? "error" : "success",
+        });
+        break;
+
+      case "tool_error":
+      case "tool_call_error":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "tool_result",
+          timestamp,
+          toolName: event.toolName,
+          toolOutput: event.error || "Tool failed",
+          status: "error",
+        });
+        break;
+
+      case "sandbox_output_partial":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "progress",
+          timestamp,
+          content: event.command
+            ? `Running sandbox command: ${event.command}`
+            : "Running sandbox command",
+          status: "running",
+        });
+        break;
+
+      case "sandbox_output":
+        items.push({
+          id: `agent-${event.id}`,
+          type: "tool_result",
+          timestamp,
+          toolName: "sandbox",
+          toolOutput: [event.command, event.output].filter(Boolean).join("\n\n"),
+          status: (event.exitCode ?? 0) === 0 ? "success" : "error",
+        });
+        break;
+    }
+  }
+
+  return items;
+}
+
 /**
  * Tools that should never be grouped (special tools with dedicated rendering)
  */
@@ -996,11 +1140,21 @@ export const AgentActivityTab = memo(function AgentActivityTab({
   isAwaitingApproval = false,
   onPlanApprove,
   onPlanReject,
+  agentStream,
 }: AgentActivityTabProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  const activityItems = useMemo(() => eventsToActivityItems(events), [events]);
+  const activityItems = useMemo(() => {
+    const workflowItems = eventsToActivityItems(events);
+    const streamedItems = agentStream
+      ? agentStreamEventsToActivityItems(agentStream.events)
+      : [];
+
+    return [...workflowItems, ...streamedItems].sort(
+      (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    );
+  }, [agentStream, events]);
   const { tasks, hasActivePlan, planStarted, planComplete } = useTaskAggregation(events);
 
   // Determine effective plan status from events if not provided via props
@@ -1082,6 +1236,64 @@ export const AgentActivityTab = memo(function AgentActivityTab({
               }
               return <ActivityCard key={item.id} item={item} tasks={tasks} />;
             })}
+
+            {/* Real-time agent activity from SSE stream */}
+            {agentStream &&
+              (agentStream.isConnected ||
+                agentStream.events.length > 0 ||
+                agentStream.activeSandboxLines.length > 0 ||
+                !!agentStream.activeSandboxCommand) && (
+              <div className="space-y-2">
+                {/* LLM streaming indicator */}
+                {agentStream.isLlmStreaming && agentStream.llmTokenBuffer && (
+                  <div className="rounded-lg border border-border bg-muted/30 p-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <BotIcon className="size-3.5 text-blue-500" />
+                      <span className="text-xs font-medium text-blue-500">Agent Thinking</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                    </div>
+                    <p className="text-xs text-muted-foreground font-mono whitespace-pre-wrap line-clamp-6">
+                      {agentStream.llmTokenBuffer.slice(-500)}
+                    </p>
+                  </div>
+                )}
+
+                {/* Recent tool calls */}
+                {agentStream.recentToolCalls.slice(-5).map((tc) => (
+                  <div key={tc.id} className="rounded-lg border border-border bg-muted/20 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <CodeIcon className="size-3.5 text-muted-foreground" />
+                      <span className="text-xs font-mono font-medium">{tc.toolName || "tool"}</span>
+                      {(tc.type === "tool_call_start" || tc.type === "tool_start") && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      )}
+                      {(tc.type === "tool_call_end" || tc.type === "tool_complete") && (
+                        <CheckCircle2Icon className="size-3.5 text-green-500" />
+                      )}
+                      {tc.durationMs != null && (
+                        <span className="text-xs text-muted-foreground ml-auto">{tc.durationMs}ms</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Active tool name */}
+                {agentStream.activeToolName && !agentStream.isLlmStreaming && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                    Running: <span className="font-mono">{agentStream.activeToolName}</span>
+                  </div>
+                )}
+
+                {(agentStream.sandboxOutputs.length > 0 || agentStream.activeSandboxCommand) && (
+                  <SandboxTerminal
+                    outputs={agentStream.sandboxOutputs}
+                    activeSandboxLines={agentStream.activeSandboxLines}
+                    activeSandboxCommand={agentStream.activeSandboxCommand}
+                  />
+                )}
+              </div>
+            )}
 
             {/* Live streaming reasoning */}
             {isStreaming && accumulatedText && (
@@ -2344,3 +2556,88 @@ function truncateOutput(output: string, maxLength = 2000): string {
   if (output.length <= maxLength) return output;
   return output.slice(0, maxLength) + "\n\n... (truncated, " + (output.length - maxLength) + " more characters)";
 }
+
+const SandboxTerminal = memo(function SandboxTerminal({
+  outputs,
+  activeSandboxLines,
+  activeSandboxCommand,
+}: {
+  outputs: Array<{ id: string; ts: string; type: string; command?: string; output?: string; exitCode?: number }>;
+  activeSandboxLines: string[];
+  activeSandboxCommand: string | null;
+}) {
+  const liveOutputRef = useRef<HTMLPreElement>(null);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (liveOutputRef.current) {
+      liveOutputRef.current.scrollTop = liveOutputRef.current.scrollHeight;
+    }
+  }, [activeSandboxLines]);
+
+  return (
+    <div className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 overflow-hidden">
+      <div className="border-b border-zinc-800 px-3 py-1.5">
+        <span className="text-xs font-medium text-zinc-400">
+          Sandbox Terminal ({outputs.length} command{outputs.length !== 1 ? "s" : ""})
+        </span>
+      </div>
+      <div className="max-h-[300px] overflow-auto">
+        {outputs.map((event, index) => {
+          const isExpanded = expandedIndex === index;
+          const outputText = event.output || "";
+          const isLong = outputText.length > 200;
+          const exitOk = (event.exitCode ?? 0) === 0;
+
+          return (
+            <div key={event.id || index} className="border-b border-zinc-800/50 last:border-0">
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-900/50"
+                onClick={() => setExpandedIndex(isExpanded ? null : index)}
+              >
+                <span className={cn("text-xs", exitOk ? "text-green-400" : "text-red-400")}>
+                  {exitOk ? "$" : "!"}
+                </span>
+                <span className="flex-1 truncate font-mono text-xs text-zinc-300">
+                  {event.command || "command"}
+                </span>
+                {event.exitCode != null && event.exitCode !== 0 && (
+                  <span className="text-xs text-red-400">exit {event.exitCode}</span>
+                )}
+                <span className="text-xs text-zinc-500">
+                  {isExpanded ? "\u25B2" : "\u25BC"}
+                </span>
+              </button>
+              {(isExpanded || !isLong) && outputText && (
+                <pre className="overflow-x-auto bg-zinc-900/30 px-3 py-2 font-mono text-xs text-zinc-400 leading-relaxed">
+                  {outputText}
+                </pre>
+              )}
+            </div>
+          );
+        })}
+
+        {activeSandboxCommand && (
+          <div className="border-b border-zinc-800/50 last:border-0">
+            <div className="flex items-center gap-2 px-3 py-1.5">
+              <span className="text-xs text-green-400 animate-pulse">$</span>
+              <span className="flex-1 truncate font-mono text-xs text-zinc-300">
+                {activeSandboxCommand}
+              </span>
+              <span className="text-xs text-zinc-500 animate-pulse">running</span>
+            </div>
+            {activeSandboxLines.length > 0 && (
+              <pre
+                ref={liveOutputRef}
+                className="max-h-[200px] overflow-auto bg-zinc-900/30 px-3 py-2 font-mono text-xs text-zinc-400 leading-relaxed"
+              >
+                {activeSandboxLines.join("\n")}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});

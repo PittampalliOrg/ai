@@ -236,8 +236,8 @@ export interface WorkflowListItem {
   submittedAt?: string;  // Actual workflow start time from request
   createdAt: string;
   updatedAt: string;
-  /** Source of the workflow: orchestrator service or workflow patterns */
-  source?: "orchestrator" | "patterns";
+  /** Source of the workflow: workflow-builder or workflow patterns */
+  source?: "orchestrator" | "workflow-builder" | "patterns";
   /** Workflow type for patterns (e.g., "sequential", "parallel") */
   workflowType?: string;
 }

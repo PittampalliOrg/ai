@@ -35,7 +35,7 @@ ENV NODE_ENV=production
 # Build-time environment variables for Next.js (NEXT_PUBLIC_* are inlined at build time)
 # These can be overridden at build time via --build-arg if needed
 ARG NEXT_PUBLIC_GITHUB_APP_CLIENT_ID="Iv23liOyweBA1S0cMIgB"
-ARG NEXT_PUBLIC_APP_URL="https://ai-chatbot.cnoe.localtest.me:8443"
+ARG NEXT_PUBLIC_APP_URL="https://ai-chatbot-ryzen.tail286401.ts.net"
 ENV NEXT_PUBLIC_GITHUB_APP_CLIENT_ID=${NEXT_PUBLIC_GITHUB_APP_CLIENT_ID}
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 

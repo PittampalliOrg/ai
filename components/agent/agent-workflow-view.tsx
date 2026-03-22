@@ -13,11 +13,12 @@
  * - Right panel (flex-1): Workflow activity or Diff/Logs tabs
  */
 
-import { memo, useMemo, useState, useCallback } from "react";
+import { memo, useMemo, useState, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useWorkflowExecution } from "@/contexts/workflow-execution-context";
 import { useWorkflow, useWorkflowStatus } from "@/hooks/use-workflows";
 import { useAgentSummary } from "@/hooks/use-agent-summary";
+import { useAgentStream } from "@/hooks/use-agent-stream";
 
 // Components
 import { derivePhase, AgentPhaseIndicator } from "./agent-phase-indicator";
@@ -48,17 +49,32 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   } = useWorkflowExecution();
 
   // Fetch workflow detail for plan information
-  const { workflow } = useWorkflow(workflowId, 3000);
+  const { workflow, mutate: mutateWorkflow } = useWorkflow(workflowId, 3000);
 
   // Fetch workflow status via REST polling (deterministic source of truth)
-  const { phase: statusPhase, progress, message: statusMessage, runtimeStatus } = useWorkflowStatus(workflowId, 2000);
+  const {
+    phase: statusPhase,
+    progress,
+    message: statusMessage,
+    runtimeStatus,
+    mutate: mutateWorkflowStatus,
+  } = useWorkflowStatus(workflowId, 2000);
 
   // Derive agent-specific state
   // Use REST-polled status as primary source, fall back to SSE events
   const phase = useMemo(() => derivePhase(events), [events]);
   const normalizedStatusPhase = statusPhase?.toLowerCase() || "";
   const normalizedRuntimeStatus = runtimeStatus?.toUpperCase() || "";
-  const isAwaitingApproval = normalizedStatusPhase === "awaiting_approval" || phase === "approve";
+  const hasBackendWorkflowState = Boolean(normalizedStatusPhase || normalizedRuntimeStatus);
+  const isBackendAwaitingApproval =
+    normalizedStatusPhase === "awaiting_approval" ||
+    normalizedRuntimeStatus === "AWAITING_APPROVAL";
+  const [approvalTransitionPending, setApprovalTransitionPending] = useState(false);
+  const isAwaitingApproval = approvalTransitionPending
+    ? false
+    : hasBackendWorkflowState
+      ? isBackendAwaitingApproval
+      : phase === "approve";
 
   // Workflow is complete when runtimeStatus is COMPLETED/FAILED/REJECTED, or phase indicates completion
   const isWorkflowComplete =
@@ -70,8 +86,31 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
     normalizedStatusPhase === "tests_failed" ||
     normalizedStatusPhase === "rejected";
 
+  useEffect(() => {
+    if (!approvalTransitionPending) {
+      return;
+    }
+
+    if (!isBackendAwaitingApproval || isWorkflowComplete) {
+      setApprovalTransitionPending(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setApprovalTransitionPending(false);
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [approvalTransitionPending, isBackendAwaitingApproval, isWorkflowComplete]);
+
   const isWorkflowActive = !!statusPhase && !isWorkflowComplete;
   const isStreaming = executionStatus === "running" && accumulatedText.length > 0;
+
+  // Real-time agent activity stream (LLM tokens, tool calls, sandbox output)
+  const agentStream = useAgentStream({
+    executionId: workflowId,
+    enabled: !!workflowId,
+  });
 
   // Override executionStatus based on backend status (more reliable)
   const derivedExecutionStatus = useMemo(() => {
@@ -143,28 +182,46 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
   const handlePlanApprove = useCallback(async () => {
     if (!workflowId) return;
     try {
-      await fetch(`/api/workflows/${workflowId}/approve`, {
+      const response = await fetch(`/api/workflows/${workflowId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved: true }),
       });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to approve plan");
+      }
+
+      setApprovalTransitionPending(true);
+      await Promise.all([mutateWorkflow(), mutateWorkflowStatus()]);
     } catch (error) {
       console.error("Failed to approve plan:", error);
+      throw error;
     }
-  }, [workflowId]);
+  }, [mutateWorkflow, mutateWorkflowStatus, workflowId]);
 
   const handlePlanReject = useCallback(async () => {
     if (!workflowId) return;
     try {
-      await fetch(`/api/workflows/${workflowId}/approve`, {
+      const response = await fetch(`/api/workflows/${workflowId}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ approved: false }),
       });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to reject plan");
+      }
+
+      setApprovalTransitionPending(true);
+      await Promise.all([mutateWorkflow(), mutateWorkflowStatus()]);
     } catch (error) {
       console.error("Failed to reject plan:", error);
+      throw error;
     }
-  }, [workflowId]);
+  }, [mutateWorkflow, mutateWorkflowStatus, workflowId]);
 
   return (
     <div className={cn("flex h-full", className)}>
@@ -207,6 +264,7 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
             progress={progress}
             onPlanApprove={handlePlanApprove}
             onPlanReject={handlePlanReject}
+            agentStream={agentStream}
           />
         </div>
       )}
@@ -243,6 +301,8 @@ export const AgentWorkflowView = memo(function AgentWorkflowView({
                     title: t.title,
                     description: t.description,
                   }))}
+                  onApprove={handlePlanApprove}
+                  onReject={handlePlanReject}
                 />
               </div>
             )}

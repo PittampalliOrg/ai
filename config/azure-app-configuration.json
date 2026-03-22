@@ -150,6 +150,36 @@
     }
   },
   {
+    "key": "WORKFLOW_BUILDER_BASE_URL",
+    "value": "http://workflow-builder.workflow-builder.svc.cluster.local:3000",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
+    "key": "WORKFLOW_BUILDER_AGENT_WORKFLOW_ID",
+    "value": "2mjd2mrptkf8zaxembsbp",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
+    "key": "WORKFLOW_BUILDER_AGENT_WORKFLOW_NAME",
+    "value": "OpenShell LangGraph Feature Delivery",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "service-url",
+      "source": "default"
+    }
+  },
+  {
     "key": "KGATEWAY_OPENAI_URL",
     "value": "https://api.openai.com/v1",
     "label": "ai-chatbot",
@@ -251,7 +281,7 @@
   },
   {
     "key": "DAPR_STATE_STORE",
-    "value": "statestore",
+    "value": "workflowstatestore",
     "label": "ai-chatbot",
     "content_type": "",
     "tags": {
@@ -291,7 +321,7 @@
   },
   {
     "key": "DAPR_WORKFLOW_STATE_STORE",
-    "value": "statestore",
+    "value": "workflowstatestore",
     "label": "ai-chatbot",
     "content_type": "",
     "tags": {
@@ -341,7 +371,7 @@
   },
   {
     "key": "AUTH_URL",
-    "value": "https://ai-chatbot.cnoe.localtest.me:8443",
+    "value": "https://ai-chatbot-ryzen.tail286401.ts.net",
     "label": "ai-chatbot",
     "content_type": "",
     "tags": {
@@ -427,6 +457,16 @@
     "tags": {
       "category": "workflow",
       "source": "Deployment-ai-chatbot"
+    }
+  },
+  {
+    "key": "USE_WORKFLOW_ORCHESTRATOR",
+    "value": "false",
+    "label": "ai-chatbot",
+    "content_type": "",
+    "tags": {
+      "category": "feature-flag",
+      "source": "default"
     }
   },
   {

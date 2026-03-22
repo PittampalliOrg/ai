@@ -23,6 +23,8 @@ export interface PlanApprovalSectionProps {
   planTitle?: string;
   planSummary?: string;
   planSteps?: PlanStep[];
+  onApprove?: () => Promise<void> | void;
+  onReject?: () => Promise<void> | void;
   className?: string;
 }
 
@@ -31,6 +33,8 @@ export const PlanApprovalSection = memo(function PlanApprovalSection({
   planTitle,
   planSummary,
   planSteps,
+  onApprove,
+  onReject,
   className,
 }: PlanApprovalSectionProps) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -45,22 +49,26 @@ export const PlanApprovalSection = memo(function PlanApprovalSection({
     setError(null);
 
     try {
-      const response = await fetch(`/api/workflows/${workflowId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved: true }),
-      });
+      if (onApprove) {
+        await onApprove();
+      } else {
+        const response = await fetch(`/api/workflows/${workflowId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved: true }),
+        });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to approve plan");
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to approve plan");
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to approve plan");
     } finally {
       setIsApproving(false);
     }
-  }, [workflowId]);
+  }, [onApprove, workflowId]);
 
   const handleReject = useCallback(async () => {
     if (!workflowId) return;
@@ -69,22 +77,26 @@ export const PlanApprovalSection = memo(function PlanApprovalSection({
     setError(null);
 
     try {
-      const response = await fetch(`/api/workflows/${workflowId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved: false }),
-      });
+      if (onReject) {
+        await onReject();
+      } else {
+        const response = await fetch(`/api/workflows/${workflowId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ approved: false }),
+        });
 
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to reject plan");
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || "Failed to reject plan");
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reject plan");
     } finally {
       setIsRejecting(false);
     }
-  }, [workflowId]);
+  }, [onReject, workflowId]);
 
   return (
     <div className={cn("bg-amber-500/5", className)}>
