@@ -610,6 +610,47 @@ export async function getWorkflowBuilderExecutionDetail(
 	}
 }
 
+export async function getWorkflowBuilderExecutionChanges(input: {
+	executionId: string;
+	durableInstanceId?: string;
+}): Promise<{
+	success: boolean;
+	executionId: string;
+	count: number;
+	changes: unknown[];
+	pending?: boolean;
+}> {
+	const query = new URLSearchParams();
+	if (input.durableInstanceId) {
+		query.set("durableInstanceId", input.durableInstanceId);
+	}
+
+	return workflowBuilderRequest(
+		`/api/internal/agent/workflows/executions/${encodeURIComponent(input.executionId)}/changes${query.size > 0 ? `?${query.toString()}` : ""}`,
+	);
+}
+
+export async function getWorkflowBuilderExecutionPatch(input: {
+	executionId: string;
+	durableInstanceId?: string;
+}): Promise<{
+	success: boolean;
+	executionId: string;
+	durableInstanceId?: string;
+	patch: string;
+	changeSets: unknown[];
+	pending?: boolean;
+}> {
+	const query = new URLSearchParams();
+	if (input.durableInstanceId) {
+		query.set("durableInstanceId", input.durableInstanceId);
+	}
+
+	return workflowBuilderRequest(
+		`/api/internal/agent/workflows/executions/${encodeURIComponent(input.executionId)}/patch${query.size > 0 ? `?${query.toString()}` : ""}`,
+	);
+}
+
 export async function getWorkflowBuilderExecutionFileSnapshot(input: {
 	executionId: string;
 	filePath: string;
