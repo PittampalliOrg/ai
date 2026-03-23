@@ -13,6 +13,8 @@ interface InstallationToken {
   repository_selection: "all" | "selected";
 }
 
+type RepoAccessTokenSource = "app" | "oauth" | "public";
+
 /**
  * Generate a JWT for GitHub App authentication using Node.js crypto
  */
@@ -180,4 +182,47 @@ export async function getRepoAccessToken(
   }
 
   throw new Error(`No GitHub access token available for ${owner}`);
+}
+
+async function isPublicRepository(owner: string, repo: string): Promise<boolean> {
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+    headers: {
+      Accept: "application/vnd.github.v3+json",
+      "User-Agent": "AI-SDK-Agent",
+    },
+  });
+
+  if (response.status === 404) {
+    return false;
+  }
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(
+      `Failed to inspect repository visibility: ${response.status} ${error}`
+    );
+  }
+
+  const payload = (await response.json()) as { private?: boolean };
+  return payload.private === false;
+}
+
+export async function resolveRepositoryAccess(input: {
+  owner: string;
+  repo: string;
+  userOAuthToken?: string;
+}): Promise<{ token?: string; source: RepoAccessTokenSource }> {
+  try {
+    return await getRepoAccessToken(input.owner, input.userOAuthToken);
+  } catch (tokenError) {
+    if (await isPublicRepository(input.owner, input.repo)) {
+      return { source: "public" };
+    }
+
+    const message =
+      tokenError instanceof Error ? tokenError.message : String(tokenError);
+    throw new Error(
+      `No repository access is available for ${input.owner}/${input.repo}. Install the GitHub App for this owner or sign in with a GitHub account that can access the repository. ${message}`
+    );
+  }
 }

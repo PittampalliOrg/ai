@@ -8,7 +8,7 @@ import {
   updateAgentSessionWorkflow,
 } from "@/lib/db/agent-queries";
 import { verifyUserExists } from "@/lib/db/queries";
-import { getRepoAccessToken } from "@/lib/github/app-auth";
+import { resolveRepositoryAccess } from "@/lib/github/app-auth";
 import { startWorkflowBuilderCodingAgentExecution } from "@/lib/workflow-builder-client";
 
 /**
@@ -63,6 +63,29 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { title, targetRepository, repoPath, task, startWorkflow } = body;
+    let repositoryAccess:
+      | Awaited<ReturnType<typeof resolveRepositoryAccess>>
+      | undefined;
+
+    if (task && startWorkflow && targetRepository) {
+      try {
+        repositoryAccess = await resolveRepositoryAccess({
+          owner: targetRepository.owner,
+          repo: targetRepository.repo,
+          userOAuthToken: session.accessToken,
+        });
+      } catch (error) {
+        return NextResponse.json(
+          {
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unable to access the requested repository",
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     let targetRepositoryId: string | undefined;
 
@@ -95,18 +118,10 @@ export async function POST(request: NextRequest) {
           `[POST /api/agent/sessions] Repository: ${targetRepository.owner}/${targetRepository.repo}@${targetRepository.branch}`
         );
 
-        // Get GitHub token for repository cloning
-        let repoToken: string | undefined;
-        try {
-          const tokenResult = await getRepoAccessToken(targetRepository.owner);
-          repoToken = tokenResult.token;
+        const repoToken = repositoryAccess?.token;
+        if (repositoryAccess) {
           console.log(
-            `[POST /api/agent/sessions] Got ${tokenResult.source} token for ${targetRepository.owner}`
-          );
-        } catch (tokenError) {
-          console.warn(
-            `[POST /api/agent/sessions] Failed to get GitHub token, will try public clone:`,
-            tokenError
+            `[POST /api/agent/sessions] Using ${repositoryAccess.source} repository access for ${targetRepository.owner}/${targetRepository.repo}`
           );
         }
 

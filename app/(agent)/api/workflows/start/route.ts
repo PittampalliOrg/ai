@@ -7,7 +7,7 @@
 
 import { NextResponse } from "next/server";
 import { auth } from "@/app/(auth)/auth";
-import { getRepoAccessToken } from "@/lib/github/app-auth";
+import { resolveRepositoryAccess } from "@/lib/github/app-auth";
 import { startWorkflowBuilderCodingAgentExecution } from "@/lib/workflow-builder-client";
 
 export const maxDuration = 60;
@@ -82,16 +82,15 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    let repoToken: string | undefined;
-    try {
-      const tokenResult = await getRepoAccessToken(targetRepository.owner);
-      repoToken = tokenResult.token;
-    } catch (tokenError) {
-      console.warn(
-        `[Workflow Start] Failed to get GitHub token for ${targetRepository.owner}, continuing without one:`,
-        tokenError
-      );
-    }
+    const repositoryAccess = await resolveRepositoryAccess({
+      owner: targetRepository.owner,
+      repo: targetRepository.repo,
+      userOAuthToken: session.accessToken,
+    });
+    const repoToken = repositoryAccess.token;
+    console.log(
+      `[Workflow Start] Using ${repositoryAccess.source} repository access for ${targetRepository.owner}/${targetRepository.repo}`
+    );
 
     const workflowResponse = await startWorkflowBuilderCodingAgentExecution({
       task,
@@ -123,13 +122,17 @@ export async function POST(request: Request): Promise<Response> {
     );
   } catch (error) {
     console.error("[Workflow Start] Error:", error);
+    const message =
+      error instanceof Error ? error.message : "Unknown error";
 
     return NextResponse.json(
       {
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
+        error: message,
       } satisfies StartWorkflowResponse,
-      { status: 500 }
+      {
+        status: message.includes("No repository access is available") ? 400 : 500,
+      }
     );
   }
 }
