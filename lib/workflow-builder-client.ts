@@ -610,6 +610,43 @@ export async function getWorkflowBuilderExecutionDetail(
 	}
 }
 
+export async function getWorkflowBuilderExecutionFileSnapshot(input: {
+	executionId: string;
+	filePath: string;
+	durableInstanceId?: string;
+}): Promise<{
+	success: boolean;
+	executionId: string;
+	path: string;
+	durableInstanceId?: string;
+	snapshot: {
+		executionId: string;
+		path: string;
+		oldPath?: string;
+		status: "A" | "M" | "D" | "R";
+		oldContent: string | null;
+		newContent: string | null;
+	} | null;
+}> {
+	const pathSegments = input.filePath
+		.split("/")
+		.map((segment) => segment.trim())
+		.filter(Boolean)
+		.map((segment) => encodeURIComponent(segment));
+	if (pathSegments.length === 0) {
+		throw new Error("filePath is required");
+	}
+
+	const query = new URLSearchParams();
+	if (input.durableInstanceId) {
+		query.set("durableInstanceId", input.durableInstanceId);
+	}
+
+	return workflowBuilderRequest(
+		`/api/internal/agent/workflows/executions/${encodeURIComponent(input.executionId)}/files/snapshot/${pathSegments.join("/")}${query.size > 0 ? `?${query.toString()}` : ""}`,
+	);
+}
+
 export async function approveWorkflowBuilderExecution(input: {
 	executionId: string;
 	approved: boolean;

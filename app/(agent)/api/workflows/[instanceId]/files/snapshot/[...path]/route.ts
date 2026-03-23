@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { getAgentSession } from "@/lib/db/agent-queries";
-import { getWorkflowBuilderExecutionDetail } from "@/lib/workflow-builder-client";
+import { parseExecutionFileChangeData } from "@/lib/workflow-change-artifacts";
+import {
+  getWorkflowBuilderExecutionDetail,
+  getWorkflowBuilderExecutionFileSnapshot,
+} from "@/lib/workflow-builder-client";
 
 async function resolveExecutionId(instanceId: string): Promise<string | null> {
   const directDetail = await getWorkflowBuilderExecutionDetail(instanceId).catch(() => null);
@@ -43,17 +47,48 @@ export async function GET(
     return NextResponse.json({ error: "File path is required" }, { status: 400 });
   }
 
-  return NextResponse.json(
-    {
-      success: true,
+  const detail = await getWorkflowBuilderExecutionDetail(executionId).catch(() => null);
+  const changeData = detail ? parseExecutionFileChangeData(detail.execution.output) : null;
+
+  try {
+    const snapshotResponse = await getWorkflowBuilderExecutionFileSnapshot({
       executionId,
-      path: filePath,
-      snapshot: null,
-    },
-    {
+      filePath,
+      durableInstanceId: changeData?.durableInstanceId,
+    });
+
+    return NextResponse.json(snapshotResponse, {
       headers: {
         "Cache-Control": "no-store",
       },
-    },
-  );
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "NOT_FOUND") {
+      return NextResponse.json(
+        {
+          success: true,
+          executionId,
+          path: filePath,
+          durableInstanceId: changeData?.durableInstanceId,
+          snapshot: null,
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    console.error("Failed to fetch workflow file snapshot:", error);
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to fetch workflow file snapshot",
+      },
+      { status: 502 },
+    );
+  }
 }

@@ -252,7 +252,7 @@ export const FileDiffAccordion = memo(function FileDiffAccordion({ file, isExpan
           {showRawPatchFallback ? (
             <div className="space-y-3 p-4">
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                Snapshot content is unavailable for this file, so this view is showing the persisted patch instead.
+                Snapshot content was not persisted for this file, so this view is showing the persisted patch instead.
               </div>
               <CodeBlock
                 code={file.rawPatch || ""}
