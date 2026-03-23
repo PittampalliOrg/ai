@@ -18,13 +18,26 @@ function getWorkflowBuilderBaseUrl(): string {
 }
 
 function getInternalToken(): string {
-  return (
-    getSecretValue("WORKFLOW_BUILDER_INTERNAL_API_TOKEN") ||
-    getSecretValue("INTERNAL_API_TOKEN") ||
-    process.env.WORKFLOW_BUILDER_INTERNAL_API_TOKEN ||
-    process.env.INTERNAL_API_TOKEN ||
-    ""
-  ).trim();
+  const candidates = [
+    process.env.WORKFLOW_BUILDER_INTERNAL_API_TOKEN,
+    process.env.INTERNAL_API_TOKEN,
+    getSecretValue("WORKFLOW_BUILDER_INTERNAL_API_TOKEN"),
+    getSecretValue("INTERNAL_API_TOKEN"),
+  ];
+
+  for (const candidate of candidates) {
+    const token = candidate?.trim();
+    if (!token) {
+      continue;
+    }
+    // Some Dapr/Key Vault flows can surface the secret alias instead of the value.
+    if (token === "INTERNAL-API-TOKEN") {
+      continue;
+    }
+    return token;
+  }
+
+  return "";
 }
 
 export async function GET(
@@ -51,6 +64,12 @@ export async function GET(
   }
 
   const streamUrl = `${getWorkflowBuilderBaseUrl()}/api/internal/agent/workflows/executions/${encodeURIComponent(targetExecutionId)}/agent-stream`;
+  console.info("[agent-stream] proxy request", {
+    instanceId,
+    targetExecutionId,
+    streamUrl,
+    tokenLength: token.length,
+  });
 
   let upstreamResponse: Response;
   try {
@@ -64,6 +83,14 @@ export async function GET(
 
   if (!upstreamResponse.ok) {
     const text = await upstreamResponse.text().catch(() => "");
+    console.warn("[agent-stream] upstream failure", {
+      instanceId,
+      targetExecutionId,
+      streamUrl,
+      status: upstreamResponse.status,
+      tokenLength: token.length,
+      bodyPreview: text.slice(0, 200),
+    });
     return new Response(text || "Upstream error", {
       status: upstreamResponse.status,
     });

@@ -139,6 +139,121 @@ interface ActivityItem {
   maxRetries?: number;
 }
 
+function parseJsonLikeString(value: string): unknown {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return value;
+  }
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+    (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function normalizeToolInput(input: unknown): Record<string, unknown> | undefined {
+  if (!input) {
+    return undefined;
+  }
+
+  let current: unknown = input;
+  if (typeof current === "string") {
+    current = parseJsonLikeString(current);
+  }
+
+  if (Array.isArray(current)) {
+    if (current.length === 1) {
+      return normalizeToolInput(current[0]);
+    }
+    return { args: current };
+  }
+
+  if (current && typeof current === "object") {
+    const record = current as Record<string, unknown>;
+    const nested =
+      record.input ||
+      record.args ||
+      record.arguments ||
+      record.parameters ||
+      record.kwargs ||
+      record.payload;
+    if (nested && nested !== current) {
+      return normalizeToolInput(nested) || record;
+    }
+    return record;
+  }
+
+  return { value: current };
+}
+
+function stringifyToolOutput(output: unknown): string | undefined {
+  if (output == null || output === "") {
+    return undefined;
+  }
+  if (typeof output === "string") {
+    return output;
+  }
+  try {
+    return JSON.stringify(output, null, 2);
+  } catch {
+    return String(output);
+  }
+}
+
+function resolveToolName(
+  candidate: string | undefined,
+  data?: Record<string, unknown>,
+): string | undefined {
+  return (
+    candidate ||
+    (typeof data?.toolName === "string" ? data.toolName : undefined) ||
+    (typeof data?.name === "string" ? data.name : undefined) ||
+    (typeof data?.tool === "string" ? data.tool : undefined)
+  );
+}
+
+function resolveToolInputFromRecord(
+  data?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!data) {
+    return undefined;
+  }
+
+  return normalizeToolInput(
+    data.toolInput ??
+      data.toolArgs ??
+      data.input ??
+      data.args ??
+      data.arguments ??
+      data.parameters ??
+      data.kwargs ??
+      data.payload,
+  );
+}
+
+function resolveToolOutputFromRecord(
+  data?: Record<string, unknown>,
+): string | undefined {
+  if (!data) {
+    return undefined;
+  }
+
+  return stringifyToolOutput(
+    data.toolOutput ??
+      data.toolResult ??
+      data.result ??
+      data.output ??
+      data.errorText ??
+      data.error,
+  );
+}
+
 /**
  * Tool group for consecutive tool calls of the same type
  */
@@ -311,14 +426,19 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         flushCurrent();
 
         // Add tool call
-        if (event.data.toolName) {
+        const eventData = event.data as Record<string, unknown>;
+        const toolName = resolveToolName(
+          typeof eventData.toolName === "string" ? eventData.toolName : undefined,
+          eventData,
+        );
+        if (toolName) {
           const callId = event.data.callId as string | undefined;
           const toolItem: ActivityItem = {
             id: event.id,
             type: "tool_call",
             timestamp: new Date(event.timestamp),
-            toolName: event.data.toolName,
-            toolInput: event.data.toolInput as Record<string, unknown> | undefined,
+            toolName,
+            toolInput: resolveToolInputFromRecord(eventData),
             status: "running",
             callId,
             agentId: event.agentId,
@@ -340,9 +460,13 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
 
         // Try to correlate with existing tool call
         const callId = event.data.callId as string | undefined;
-        const resultToolName = event.data.toolName as string | undefined;
-        const resultOutput = (event.data.result || event.data.toolOutput || "") as string;
-        const isError = Boolean(event.data.isError);
+        const eventData = event.data as Record<string, unknown>;
+        const resultToolName = resolveToolName(
+          typeof eventData.toolName === "string" ? eventData.toolName : undefined,
+          eventData,
+        );
+        const resultOutput = resolveToolOutputFromRecord(eventData) || "";
+        const isError = Boolean(event.data.isError || event.data.error);
         const newStatus = isError ? "error" : "success";
 
         // 1. First try by callId
@@ -368,6 +492,9 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
         if (matchedCall) {
           // Update the existing tool call with result
           matchedCall.status = newStatus;
+          if (!matchedCall.toolInput) {
+            matchedCall.toolInput = resolveToolInputFromRecord(eventData);
+          }
           matchedCall.toolOutput = resultOutput;
           if (callId) {
             pendingToolCalls.delete(callId);
@@ -390,7 +517,8 @@ function eventsToActivityItems(events: WorkflowStreamEvent[]): ActivityItem[] {
           const writeTools = ["write_file", "write", "create", "str_replace_based_edit_tool", "edit"];
           if (writeTools.includes(resultToolName.toLowerCase())) {
             // Try to extract file path from the matched call's input or event data
-            const toolInput = (matchedCall?.toolInput || event.data.toolInput) as Record<string, unknown> | undefined;
+            const toolInput =
+              matchedCall?.toolInput || resolveToolInputFromRecord(eventData);
             const writePath = (
               toolInput?.path || toolInput?.file_path || toolInput?.filePath || toolInput?.file
             ) as string | undefined;
@@ -715,6 +843,16 @@ function agentStreamEventsToActivityItems(
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
   const pendingToolCalls = new Map<string, ActivityItem>();
+  const isShellToolName = (toolName?: string): boolean => {
+    const normalizedName = (toolName || "").toLowerCase();
+    return (
+      normalizedName === "executecommand" ||
+      normalizedName === "execute_command" ||
+      normalizedName === "execute_openshell_command" ||
+      normalizedName === "shell" ||
+      normalizedName === "bash"
+    );
+  };
 
   const getPendingToolKey = (
     toolName?: string,
@@ -725,12 +863,13 @@ function agentStreamEventsToActivityItems(
     }
 
     const serializedArgs =
-      toolArgs == null ? "" : JSON.stringify(toolArgs, null, 0);
+      toolArgs == null ? "" : JSON.stringify(normalizeToolInput(toolArgs) ?? toolArgs, null, 0);
     return `${toolName}:${serializedArgs}`;
   };
 
   for (const event of events) {
     const timestamp = new Date(event.ts);
+    const eventMeta = (event as { meta?: Record<string, unknown> }).meta;
 
     switch (event.type) {
       case "run_started":
@@ -787,17 +926,21 @@ function agentStreamEventsToActivityItems(
 
       case "tool_start":
       case "tool_call_start": {
+        const toolName = resolveToolName(event.toolName, eventMeta);
+        const toolInput =
+          normalizeToolInput(event.toolArgs) ||
+          resolveToolInputFromRecord(eventMeta);
         const toolItem: ActivityItem = {
           id: `agent-${event.id}`,
           type: "tool_call",
           timestamp,
-          toolName: event.toolName,
-          toolInput: event.toolArgs as Record<string, unknown> | undefined,
+          toolName,
+          toolInput,
           status: "running",
         };
         items.push(toolItem);
 
-        const pendingKey = getPendingToolKey(event.toolName, event.toolArgs);
+        const pendingKey = getPendingToolKey(toolName, toolInput);
         if (pendingKey) {
           pendingToolCalls.set(pendingKey, toolItem);
         }
@@ -806,28 +949,38 @@ function agentStreamEventsToActivityItems(
 
       case "tool_complete":
       case "tool_call_end": {
+        const toolName = resolveToolName(event.toolName, eventMeta);
+        const toolInput =
+          normalizeToolInput(event.toolArgs) ||
+          resolveToolInputFromRecord(eventMeta);
         const toolOutput =
-          typeof event.toolResult === "string"
-            ? event.toolResult
-            : event.toolResult != null
-              ? JSON.stringify(event.toolResult, null, 2)
-              : event.status === "nonzero_exit"
-                ? "Command failed"
-                : "Completed";
+          stringifyToolOutput(event.toolResult) ||
+          resolveToolOutputFromRecord(eventMeta) ||
+          (event.command
+            ? stringifyToolOutput({
+                command: event.command,
+                output: event.output,
+                exitCode: event.exitCode,
+              })
+            : undefined) ||
+          (event.status === "nonzero_exit" ? "Command failed" : "Completed");
         const nextStatus = event.status === "nonzero_exit" ? "error" : "success";
-        const pendingKey = getPendingToolKey(event.toolName, event.toolArgs);
+        const pendingKey = getPendingToolKey(toolName, toolInput);
         const matchedCall =
           (pendingKey ? pendingToolCalls.get(pendingKey) : null) ||
           items.find(
             (item) =>
               item.type === "tool_call" &&
               item.status === "running" &&
-              item.toolName === event.toolName,
+              item.toolName?.toLowerCase() === toolName?.toLowerCase(),
           ) ||
           null;
 
         if (matchedCall) {
           matchedCall.status = nextStatus;
+          if (!matchedCall.toolInput && toolInput) {
+            matchedCall.toolInput = toolInput;
+          }
           matchedCall.toolOutput = toolOutput;
           if (pendingKey) {
             pendingToolCalls.delete(pendingKey);
@@ -837,7 +990,8 @@ function agentStreamEventsToActivityItems(
             id: `agent-${event.id}`,
             type: "tool_result",
             timestamp,
-            toolName: event.toolName,
+            toolName,
+            toolInput,
             toolOutput,
             status: nextStatus,
           });
@@ -847,20 +1001,30 @@ function agentStreamEventsToActivityItems(
 
       case "tool_error":
       case "tool_call_error": {
-        const pendingKey = getPendingToolKey(event.toolName, event.toolArgs);
+        const toolName = resolveToolName(event.toolName, eventMeta);
+        const toolInput =
+          normalizeToolInput(event.toolArgs) ||
+          resolveToolInputFromRecord(eventMeta);
+        const pendingKey = getPendingToolKey(toolName, toolInput);
         const matchedCall =
           (pendingKey ? pendingToolCalls.get(pendingKey) : null) ||
           items.find(
             (item) =>
               item.type === "tool_call" &&
               item.status === "running" &&
-              item.toolName === event.toolName,
+              item.toolName?.toLowerCase() === toolName?.toLowerCase(),
           ) ||
           null;
 
         if (matchedCall) {
           matchedCall.status = "error";
-          matchedCall.toolOutput = event.error || "Tool failed";
+          if (!matchedCall.toolInput && toolInput) {
+            matchedCall.toolInput = toolInput;
+          }
+          matchedCall.toolOutput =
+            event.error ||
+            resolveToolOutputFromRecord(eventMeta) ||
+            "Tool failed";
           if (pendingKey) {
             pendingToolCalls.delete(pendingKey);
           }
@@ -869,8 +1033,12 @@ function agentStreamEventsToActivityItems(
             id: `agent-${event.id}`,
             type: "tool_result",
             timestamp,
-            toolName: event.toolName,
-            toolOutput: event.error || "Tool failed",
+            toolName,
+            toolInput,
+            toolOutput:
+              event.error ||
+              resolveToolOutputFromRecord(eventMeta) ||
+              "Tool failed",
             status: "error",
           });
         }
@@ -890,15 +1058,45 @@ function agentStreamEventsToActivityItems(
         break;
 
       case "sandbox_output":
-        items.push({
-          id: `agent-${event.id}`,
-          type: "tool_result",
-          timestamp,
-          toolName: "shell",
-          toolInput: event.command ? { command: event.command } : undefined,
-          toolOutput: event.output || "Command completed",
-          status: (event.exitCode ?? 0) === 0 ? "success" : "error",
-        });
+        {
+          const matchingShellCall =
+            [...items]
+              .reverse()
+              .find(
+                (item) =>
+                  item.type === "tool_call" &&
+                  isShellToolName(item.toolName) &&
+                  (
+                    event.command
+                      ? (
+                          (item.toolInput as Record<string, unknown> | undefined)?.command ===
+                            event.command ||
+                          !item.toolInput
+                        )
+                      : true
+                  ),
+              ) || null;
+
+          if (matchingShellCall) {
+            matchingShellCall.toolName = "shell";
+            matchingShellCall.toolInput = event.command
+              ? { command: event.command }
+              : matchingShellCall.toolInput;
+            matchingShellCall.toolOutput = event.output || "Command completed";
+            matchingShellCall.status = (event.exitCode ?? 0) === 0 ? "success" : "error";
+            break;
+          }
+
+          items.push({
+            id: `agent-${event.id}`,
+            type: "tool_result",
+            timestamp,
+            toolName: "shell",
+            toolInput: event.command ? { command: event.command } : undefined,
+            toolOutput: event.output || "Command completed",
+            status: (event.exitCode ?? 0) === 0 ? "success" : "error",
+          });
+        }
         break;
     }
   }
@@ -1162,12 +1360,21 @@ function useTaskAggregation(events: WorkflowStreamEvent[]): {
  */
 function getToolDisplayInfo(toolName: string, input: unknown): { title: string; subtitle?: string } {
   const normalizedName = toolName.toLowerCase();
-  const inputObj = input as Record<string, unknown> | undefined;
+  const inputObj = normalizeToolInput(input);
 
-  const path = inputObj?.path || inputObj?.file_path || inputObj?.filePath || inputObj?.file;
-  const command = inputObj?.command;
-  const pattern = inputObj?.pattern;
-  const query = inputObj?.query;
+  const path =
+    inputObj?.path ||
+    inputObj?.file_path ||
+    inputObj?.filePath ||
+    inputObj?.file ||
+    inputObj?.filename;
+  const command =
+    inputObj?.command ||
+    inputObj?.cmd ||
+    inputObj?.argv ||
+    inputObj?.shellCommand;
+  const pattern = inputObj?.pattern || inputObj?.regex;
+  const query = inputObj?.query || inputObj?.search || inputObj?.term;
 
   const label = TOOL_LABELS[normalizedName] || toolName;
 
@@ -2149,6 +2356,7 @@ const ToolCard = memo(function ToolCard({ item }: { item: ActivityItem }) {
   const normalizedName = (item.toolName || "").toLowerCase();
   const { title, subtitle } = getToolDisplayInfo(item.toolName || "", item.toolInput);
   const state = mapToolStatus(item.status);
+  const hasDetails = Boolean(item.toolInput || item.toolOutput);
 
   // Build the display title with subtitle
   const displayTitle = subtitle ? `${title}: ${subtitle}` : title;
@@ -2184,7 +2392,7 @@ const ToolCard = memo(function ToolCard({ item }: { item: ActivityItem }) {
 
   return (
     <div className="ml-11">
-      <Tool defaultOpen={item.status === "running"}>
+      <Tool defaultOpen={item.status !== "success" || hasDetails}>
         <ToolHeader
           title={displayTitle}
           type="tool-invocation"

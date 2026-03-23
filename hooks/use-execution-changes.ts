@@ -81,6 +81,7 @@ function splitPatchByFile(patch: string): Map<string, string> {
 
   let currentBlock: string[] = [];
   let currentPath: string | null = null;
+  let currentHasFileHeaders = false;
 
   const flush = () => {
     if (currentPath && currentBlock.length > 0) {
@@ -88,21 +89,31 @@ function splitPatchByFile(patch: string): Map<string, string> {
     }
     currentBlock = [];
     currentPath = null;
+    currentHasFileHeaders = false;
   };
 
   for (const line of lines) {
+    const startsLegacyFileBlock =
+      line.startsWith("--- ") &&
+      currentBlock.length > 0 &&
+      currentHasFileHeaders;
+
     if (line.startsWith("diff --git ")) {
+      flush();
+    } else if (startsLegacyFileBlock) {
       flush();
     }
 
     currentBlock.push(line);
 
     if (line.startsWith("+++ ")) {
+      currentHasFileHeaders = true;
       const value = line.slice(4).trim();
       if (value !== "/dev/null") {
         currentPath = value.replace(/^b\//, "");
       }
     } else if (!currentPath && line.startsWith("--- ")) {
+      currentHasFileHeaders = true;
       const value = line.slice(4).trim();
       if (value !== "/dev/null") {
         currentPath = value.replace(/^a\//, "");
@@ -132,7 +143,10 @@ function buildDurableFileChanges(args: {
 
   for (const [path, entry] of fileEntries.entries()) {
     const snapshot = args.snapshots.get(path) ?? null;
-    const rawPatch = patchBlocks.get(path) ?? null;
+    const rawPatch =
+      patchBlocks.get(path) ??
+      (entry.oldPath ? patchBlocks.get(entry.oldPath) : null) ??
+      null;
     const patchLines = rawPatch ? rawPatch.split("\n") : [];
 
     const additions = countMatchingLines(patchLines, "+");
