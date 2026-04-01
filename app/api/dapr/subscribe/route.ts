@@ -12,7 +12,7 @@ import { NextResponse } from "next/server";
 // Pub/sub configuration
 const PUBSUB_NAME = process.env.PUBSUB_NAME ?? "pubsub";
 const WORKFLOW_STREAM_SUBSCRIPTION_ENABLED =
-  process.env.WORKFLOW_STREAM_SUBSCRIPTION_ENABLED === "true";
+  process.env.WORKFLOW_STREAM_SUBSCRIPTION_ENABLED !== "false";
 
 /**
  * Subscription configuration

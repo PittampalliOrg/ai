@@ -20,7 +20,9 @@ interface WorkflowStreamEvent {
 }
 
 // Redis configuration
-const REDIS_HOST = process.env.REDIS_HOST || "redis.ai-chatbot.svc.cluster.local";
+const REDIS_URL = process.env.REDIS_URL;
+const REDIS_HOST =
+  process.env.REDIS_HOST || "ai-chatbot-redis.workflow-builder.svc.cluster.local";
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || "6379", 10);
 const EVENT_KEY_PREFIX = "workflow-events:";
 const MAX_EVENTS_PER_WORKFLOW = 1000;
@@ -31,22 +33,30 @@ let redisClient: Redis | null = null;
 
 function getRedisClient(): Redis {
   if (!redisClient) {
-    redisClient = new Redis({
-      host: REDIS_HOST,
-      port: REDIS_PORT,
+    const connectionOptions = {
       maxRetriesPerRequest: 3,
-      retryStrategy: (times) => {
+      retryStrategy: (times: number) => {
         if (times > 3) return null;
         return Math.min(times * 100, 1000);
       },
-    });
+    };
+
+    redisClient = REDIS_URL
+      ? new Redis(REDIS_URL, connectionOptions)
+      : new Redis({
+          host: REDIS_HOST,
+          port: REDIS_PORT,
+          ...connectionOptions,
+        });
 
     redisClient.on("error", (err) => {
       console.error("[EventStore] Redis error:", err.message);
     });
 
     redisClient.on("connect", () => {
-      console.log(`[EventStore] Connected to Redis at ${REDIS_HOST}:${REDIS_PORT}`);
+      console.log(
+        `[EventStore] Connected to Redis at ${REDIS_URL ?? `${REDIS_HOST}:${REDIS_PORT}`}`,
+      );
     });
   }
   return redisClient;
