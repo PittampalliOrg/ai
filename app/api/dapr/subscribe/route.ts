@@ -11,6 +11,8 @@ import { NextResponse } from "next/server";
 
 // Pub/sub configuration
 const PUBSUB_NAME = process.env.PUBSUB_NAME ?? "pubsub";
+const WORKFLOW_STREAM_SUBSCRIPTION_ENABLED =
+  process.env.WORKFLOW_STREAM_SUBSCRIPTION_ENABLED === "true";
 
 /**
  * Subscription configuration
@@ -28,14 +30,15 @@ interface DaprSubscription {
  * Returns the list of subscriptions for Dapr.
  */
 export async function GET() {
-  const subscriptions: DaprSubscription[] = [
-    {
+  const subscriptions: DaprSubscription[] = [];
+
+  if (WORKFLOW_STREAM_SUBSCRIPTION_ENABLED) {
+    subscriptions.push({
       pubsubname: PUBSUB_NAME,
       topic: "workflow.stream",
       route: "/api/webhooks/dapr/workflow-stream",
-    },
-    // Add more subscriptions here as needed
-  ];
+    });
+  }
 
   return NextResponse.json(subscriptions);
 }

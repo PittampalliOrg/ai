@@ -97,6 +97,49 @@ interface DaprPubSubMessage {
   type?: string;
 }
 
+function extractWorkflowStreamEvent(
+  body: DaprPubSubMessage | WorkflowStreamEvent | Record<string, unknown>,
+): WorkflowStreamEvent | null {
+  if (
+    "workflowId" in body &&
+    typeof body.workflowId === "string" &&
+    "type" in body &&
+    typeof body.type === "string"
+  ) {
+    return body as WorkflowStreamEvent;
+  }
+
+  if (!("data" in body) || typeof body.data !== "object" || body.data === null) {
+    return null;
+  }
+
+  const envelopeData = body.data as Record<string, unknown>;
+  if (
+    "workflowId" in envelopeData &&
+    typeof envelopeData.workflowId === "string" &&
+    "type" in envelopeData &&
+    typeof envelopeData.type === "string"
+  ) {
+    return envelopeData as unknown as WorkflowStreamEvent;
+  }
+
+  if (!("data" in envelopeData) || typeof envelopeData.data !== "object" || envelopeData.data === null) {
+    return null;
+  }
+
+  const nestedData = envelopeData.data as Record<string, unknown>;
+  if (
+    "workflowId" in nestedData &&
+    typeof nestedData.workflowId === "string" &&
+    "type" in nestedData &&
+    typeof nestedData.type === "string"
+  ) {
+    return nestedData as unknown as WorkflowStreamEvent;
+  }
+
+  return null;
+}
+
 // ============================================================================
 // Route Handler
 // ============================================================================
@@ -108,20 +151,13 @@ interface DaprPubSubMessage {
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = (await request.json()) as DaprPubSubMessage | WorkflowStreamEvent;
-
-    // Handle both Dapr CloudEvent envelope and raw event
-    let event: WorkflowStreamEvent;
-    if ("data" in body && body.data && "workflowId" in body.data) {
-      event = body.data as WorkflowStreamEvent;
-    } else {
-      event = body as WorkflowStreamEvent;
-    }
+    const body = (await request.json()) as DaprPubSubMessage | WorkflowStreamEvent | Record<string, unknown>;
+    const event = extractWorkflowStreamEvent(body);
 
     // Validate event structure
-    if (!event.workflowId || !event.type) {
-      console.warn("[Webhook] Invalid event structure:", body);
-      return NextResponse.json({ error: "Invalid event structure" }, { status: 400 });
+    if (!event) {
+      console.warn("[Webhook] Ignoring unsupported workflow stream payload:", body);
+      return NextResponse.json({ ignored: true }, { status: 200 });
     }
 
     // Log the event (for debugging)
